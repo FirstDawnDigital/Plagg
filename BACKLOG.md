@@ -23,8 +23,8 @@ bundles) -- opdateres først med FRISK data når Esben aktivt sætter
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
 G14   Vinted-fix: priming-retry+badges  Size 3        DONE
-G15   Størrelse: eksakt/op, aldrig ned  Size 2        NÆSTE
-G6    Stand-normalisering (m. punkt 3)  Size 4-5      TODO
+G15   Størrelse: eksakt/op, aldrig ned  Size 2        DONE
+G6    Stand-normalisering (m. punkt 3)  Size 4-5      NÆSTE
 G16   Vinted land + polsk-nedprioritet  Size 6-7      TODO (afh. profilside)
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
@@ -57,15 +57,21 @@ lykkedes på 1. forsøg (anon_id sat); et tvunget 404-scenarie bekræftede
 end mod ægte Vinted gav 5/5 hits m. pris/størrelse/mærke/sælger udfyldt;
 JS-syntax for `docs/index.html` verificeret med `node --check`. Size 3.
 
-**G15 — Størrelse: eksakt eller næste OP, aldrig mindre.** Punkt 2. I dag
-giver `matching._size_rank()` "nær" ved BEGGE nabostørrelser (104 → både
-98 og 110). Esben vil: eksakt = bedst, næste størrelse OP (104→110) =
-acceptabelt nær-match, MINDRE (104→98) = matcher ALDRIG (barnet vokser).
-**Teknisk:** erstat `_neighbor_sizes()`-brugen i `_size_rank()` med kun
-`SIZE_LADDER[idx+1]`. Kant-cases: tom ønske-størrelse skal STADIG →
-"eksakt" (G7 uændret); Sellpy/Vinted-intervalstørrelser ("98/104")
-matcher i dag hverken -- overvej at parse første token. Size 2, ingen
-afhængigheder.
+**G15 (DONE, 2026-07-10) — Størrelse: eksakt eller næste OP, aldrig mindre.**
+Punkt 2. Før gav `matching._size_rank()` "nær" ved BEGGE nabostørrelser
+(104 → både 98 og 110). Esben ville: eksakt = bedst, næste størrelse OP
+(104→110) = acceptabelt nær-match, MINDRE (104→98) = matcher ALDRIG
+(barnet vokser). **Leveret:** `_neighbor_sizes()` returnerer nu KUN
+`SIZE_LADDER[idx+1]` (næste op), aldrig `idx-1`. Ekstra: Sellpys interval-
+størrelser ("CHILD-CM-98/104") blev tidligere trunkeret til første
+(laveste) tal -- det ville have gjort et 98/104-plag "for lille" for et
+110-ønske selvom det reelt dækker op til 104. `sources/sellpy.py` bevarer
+nu hele intervallet ("98/104"), og ny `matching._item_size_tokens()`
+prøver hvert tal i intervallet for sig i `_size_rank()`. **Verificeret:**
+16 regressions-cases (eksakt/næste-op/aldrig-ned/G7-tom-størrelse/kant-af-
+stige/intervaller) -- alle bestod; `sources/sellpy._parse_cm_size()`
+end-to-end-tjekket ("CHILD-CM-80"→"80", "CHILD-CM-98/104"→"98/104",
+voksen-skala→""). Size 2, ingen afhængigheder.
 
 **G6 (opdateret — punkt 3 slået sammen hertil) — Stand-normalisering.**
 Punkt 3 ER en fuld specifikation af det gamle G6. Hver platform angiver

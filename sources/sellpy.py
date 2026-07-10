@@ -71,18 +71,19 @@ ALGOLIA_INDEX = "prod_marketItem_da_relevance"
 
 ITEM_URL_TMPL = "https://www.sellpy.dk/item/{object_id}"
 
-# Foerste tal-gruppe efter "CM-" i en Sellpy-stoerrelse. Ved interval-stoerrelser
-# ("CHILD-CM-98/104") tager vi bevidst det FOERSTE tal (se modulets docstring og
-# BACKLOG.md's G8-note) -- det er den numeriske vaerdi der ligger paa vores
-# SIZE_LADDER (matching.py), og et 98/104-plag bliver da et nabo-/eksakt-match
-# for baade 98 og 104 via matching._neighbor_sizes.
-_CM_SIZE_RE = re.compile(r"CM-(\d+)")
+# Tal-gruppe(r) efter "CM-" i en Sellpy-stoerrelse. Ved interval-stoerrelser
+# ("CHILD-CM-98/104") BEVARER vi nu begge tal som "98/104" (G15, 2026-07-10 --
+# foer G15 tog vi bevidst kun det foerste tal, men matching._size_rank proever
+# nu hvert tal i intervallet for sig via _item_size_tokens(), saa et 98/104-
+# plag ogsaa kan tael som et match for et oenske om 104, ikke kun 98).
+_CM_SIZE_RE = re.compile(r"CM-(\d+(?:/\d+)?)")
 
 
 def _parse_cm_size(raw_size) -> str:
-    """Udtraekker cm-tallet fra en Sellpy-boernestoerrelse ('CHILD-CM-80' -> '80',
-    'CHILD-CM-98/104' -> '98'). Returnerer "" for manglende/uventet format eller
-    ikke-cm-skala (fx voksen 'WMN-INT-S') -- crasher ALDRIG paa uventet input.
+    """Udtraekker cm-stoerrelsen fra en Sellpy-boernestoerrelse ('CHILD-CM-80'
+    -> '80', 'CHILD-CM-98/104' -> '98/104' -- se modulets docstring og G15).
+    Returnerer "" for manglende/uventet format eller ikke-cm-skala (fx voksen
+    'WMN-INT-S') -- crasher ALDRIG paa uventet input.
     J7-PRAECISERING: tom stoerrelse frasorterer KUN en Sellpy-voksenvare naar
     oensket selv har en numerisk stoerrelse at sammenligne med (matching._size_rank
     afviser da manglende annonce-stoerrelse). For et stoerrelsesloest oenske (G7:

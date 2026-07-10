@@ -43,15 +43,30 @@ def _type_matches(wishlist_type: str, item_title: str) -> bool:
 
 
 def _neighbor_sizes(size: str) -> set[str]:
+    """G15: KUN naeste stoerrelse OP taeller som 'naer' -- ALDRIG en mindre.
+    Boern vokser fra toej, ikke ind i det igen -- en annonce der allerede er
+    for lille er ubrugelig uanset hvor god en pris/naer-match den ellers
+    ville have vaeret. (Foer G15 talte begge naboer -- 104 -> baade 98 og
+    110 -- det er den adfaerd Esben eksplicit bad om at fjerne.)"""
     if size not in SIZE_LADDER:
         return set()
     idx = SIZE_LADDER.index(size)
-    neighbors = set()
-    if idx > 0:
-        neighbors.add(SIZE_LADDER[idx - 1])
     if idx < len(SIZE_LADDER) - 1:
-        neighbors.add(SIZE_LADDER[idx + 1])
-    return neighbors
+        return {SIZE_LADDER[idx + 1]}
+    return set()
+
+
+def _item_size_tokens(item_size: str) -> list[str]:
+    """G15: Sellpy angiver intervalstoerrelser som "98/104" (bevaret som
+    saadan af sources/sellpy.py's _parse_cm_size -- se dens docstring). Vi
+    proever HVER stoerrelse i intervallet for sig, saa fx et 98/104-plag
+    ogsaa taeller som eksakt/naer for et oenske om 104 (plagget daekker
+    rent faktisk den stoerrelse), ikke kun for 98. Almindelige enkelt-
+    stoerrelser giver blot en liste med ét element."""
+    item_size = str(item_size or "").strip()
+    if "/" in item_size:
+        return [tok.strip() for tok in item_size.split("/") if tok.strip()]
+    return [item_size]
 
 
 def _size_rank(wl_size: str, item_size: str) -> str | None:
@@ -62,12 +77,13 @@ def _size_rank(wl_size: str, item_size: str) -> str | None:
     wl_size = str(wl_size or "").strip()
     if not wl_size:
         return "eksakt"
-    item_size = str(item_size or "").strip()
-    if item_size == wl_size:
-        return "eksakt"
-    if item_size in _neighbor_sizes(wl_size):
-        return "naer"
-    return None
+    best = None
+    for tok in _item_size_tokens(item_size):
+        if tok == wl_size:
+            return "eksakt"
+        if tok in _neighbor_sizes(wl_size):
+            best = "naer"
+    return best
 
 
 def precheck(wishlist_item: dict, listing: dict) -> bool:
