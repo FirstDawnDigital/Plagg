@@ -24,19 +24,32 @@ G8-spike (BACKLOG.md, 2026-07-10) bekraeftet med rigtige kald 2026-07-10:
                                  "CHILD-CM-98/104"); voksen/andet i anden skala
                                  ("WMN-INT-S") -- vi PARSER cm-tallet ud (foerste
                                  tal ved interval, se _parse_cm_size); ikke-cm-
-                                 stoerrelser giver "" (matcher da ingen numerisk
-                                 boernestoerrelse, saa voksentoej frasorteres af
-                                 matching._size_rank -- oensket adfaerd).
+                                 stoerrelser giver "" (tom stoerrelse).
+                                 J7-PRAECISERING (doc-rot fundet i kritikrunde
+                                 2026-07-10): dette udelukker KUN voksentoej
+                                 naar oensket rent faktisk HAR en stoerrelse
+                                 angivet -- matching._size_rank behandler tom
+                                 stoerrelse som "stoerrelse er ikke et kriterie"
+                                 (G7). For et STOERRELSESLOEST oenske (fx et
+                                 legetoejs-oenske uden cm-stoerrelse) matcher en
+                                 voksen Sellpy-vare SAA LAENGE type+pris passer
+                                 -- der er INGEN generel voksentoejs-udelukkelse,
+                                 kun en udelukkelse betinget af at oensket har
+                                 en numerisk stoerrelse at sammenligne med.
       metadata.condition     -> dansk stand ("Nyt"/"Meget god"/"God"/"Acceptabelt")
       isOnShelf (bool)       -> KUN true medtages; resten er solgt/reserveret.
       segment                -> fx "children" (boernetoej) / "women" osv.
 
 Sellpy er en KONSIGNATIONSmodel: alle varer sendes af Sellpy selv med faelles
 fragt, ikke af individuelle saelgere. Vi saetter derfor seller_name="Sellpy"
-konsekvent (seller_id=None), saa bundling._seller_key grupperer alt Sellpy-gods
-for sig, men ALDRIG blander det med Reshopper/DBA (den praefikser med source).
-Fragtprisen er faelles/ukendt fast vaerdi -> shipping_price=None (bundling
-falder da tilbage til default_shipping_dkk, som for de andre kilder).
+konsekvent (seller_id=None). J5-FIX (kritikrunde 2026-07-10): netop FORDI
+"Sellpy" ikke er en rigtig individuel saelger, ville bundling.py ellers
+kollapse usammenhaengende Sellpy-fund (fx leggings+duplo+jakke) til én
+kunstig "bundle" der naesten altid "betaler sig" og udvander signalet --
+bundling.py's NON_BUNDLEABLE_SOURCES udelukker derfor "sellpy" fra
+bundle-dannelse helt. Sellpy-matches optraeder KUN i Matches-listen, aldrig
+i Bundles. Fragtprisen er faelles/ukendt fast vaerdi -> shipping_price=None
+(irrelevant for bundling naar kilden alligevel er udelukket derfra).
 
 Fejler ALDRIG hele scriptet: netvaerks-/parsefejl logges og giver blot en tom
 liste (eller springer det enkelte hit over), aldrig en undtagelse op i monitor.py.
@@ -69,10 +82,13 @@ _CM_SIZE_RE = re.compile(r"CM-(\d+)")
 def _parse_cm_size(raw_size) -> str:
     """Udtraekker cm-tallet fra en Sellpy-boernestoerrelse ('CHILD-CM-80' -> '80',
     'CHILD-CM-98/104' -> '98'). Returnerer "" for manglende/uventet format eller
-    ikke-cm-skala (fx voksen 'WMN-INT-S') -- crasher ALDRIG paa uventet input
-    (G7: tom stoerrelse = 'stoerrelse er ikke et kriterie' i matching._size_rank,
-    men her betyder tom snarere 'ukendt/ikke boernestoerrelse', hvilket korrekt
-    frasorterer voksentoej mod en numerisk oenske-stoerrelse)."""
+    ikke-cm-skala (fx voksen 'WMN-INT-S') -- crasher ALDRIG paa uventet input.
+    J7-PRAECISERING: tom stoerrelse frasorterer KUN en Sellpy-voksenvare naar
+    oensket selv har en numerisk stoerrelse at sammenligne med (matching._size_rank
+    afviser da manglende annonce-stoerrelse). For et stoerrelsesloest oenske (G7:
+    tom stoerrelse = "stoerrelse er ikke et kriterie") er der INGEN udelukkelse
+    -- en voksenvare kan udmaerket matche et stoerrelsesloest oenske paa
+    type+pris alene. Ingen generel "voksentoej udelukkes altid"-garanti."""
     if not raw_size:
         return ""
     m = _CM_SIZE_RE.search(str(raw_size))

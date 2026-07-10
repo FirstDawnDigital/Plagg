@@ -283,8 +283,8 @@ def ensure_control_tab(spreadsheet, tab_name: str = "Kontrolpanel"):
         ["Kør nu", False,
          "Sæt hak for at køre en overvågning NU (ellers køres der automatisk 2x dagligt). "
          "Kan tage op til 15 sek. før Status skifter til 'Kører...'. Selve kørslen "
-         "kan tage flere minutter og af og til over et kvarter, afhængig af hvor "
-         "meget nyt der skal tjekkes.", ""],
+         "kan tage op til 15 min., afhængig af hvor meget nyt der skal tjekkes "
+         "(J6, kritikrunde 2026-07-10: reelle kørsler har spændt fra 2,5 til 14 min.).", ""],
         ["Status", CONTROL_STATUS_READY, "", ""],
         ["Sidst kørt", "", "", ""],
     ], range_name="A1", value_input_option="USER_ENTERED")
@@ -327,7 +327,8 @@ def read_run_now(ws) -> bool:
 def set_status(ws, text: str) -> None:
     """Saettes med det samme naar en koersel starter ('Kører...') -- ét
     lille skrive-kald, adskilt fra finish_run() saa brugeren kan se at
-    koerslen er i gang mens den staar paa (kan tage flere minutter)."""
+    koerslen er i gang mens den staar paa (kan tage op til 15 min., se
+    J6/trigger_watcher.py)."""
     ws.update([[text]], range_name=CONTROL_STATUS_CELL, value_input_option="USER_ENTERED")
 
 

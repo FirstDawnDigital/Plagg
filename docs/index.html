@@ -196,6 +196,15 @@
     <div id="load-error"></div>
     <div id="run-banner"></div>
 
+    <!-- UX-fix (kritikrunde 2026-07-10): TL;DR-banneret staar nu FØR
+         ønskeseddel-sektionen -- det allerførste indhold under topbar'en
+         (bortset fra fejl-/kørsels-bannere, som kun vises betinget). Esben
+         bad tidligere om at flytte ønskesedlen til toppen, men med 7 ønsker
+         begravede det "hvad skal jeg handle på nu"-signalet langt nede.
+         Ønskeseddel-SEKTIONEN rører vi ikke -- den staar stadig lige efter,
+         saa hun stadig kan redigere ønsker uden at scrolle langt. -->
+    <div id="tldr-banner" style="display:none"></div>
+
     <section id="wishlist-section">
       <h2>Ønskeseddel</h2>
       <div id="wishlist-list"><div class="empty-hint">Henter…</div></div>
@@ -225,8 +234,6 @@
         <button type="submit" id="wl-add-btn">Tilføj til ønskeseddel</button>
       </form>
     </section>
-
-    <div id="tldr-banner" style="display:none"></div>
 
     <section id="bundles-section">
       <h2>Bundles (samlet fragt)</h2>

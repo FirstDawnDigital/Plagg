@@ -11,6 +11,17 @@ from collections import defaultdict
 
 logger = logging.getLogger("personal_shopper.bundling")
 
+# J5 (kritikrunde 2026-07-10): kilder hvor "bundling pr. sælger" IKKE giver
+# mening, fordi seller_name er en kunstig, hardcodet konstant fremfor en
+# rigtig individuel sælger (se fx sources/sellpy.py: Sellpy er konsignation,
+# ALT saettes til seller_name="Sellpy"). Uden denne udelukkelse ville
+# usammenhaengende items (fx leggings+duplo+jakke fra vidt forskellige
+# reelle saelgere) kollapse til én kunstig "bundle" der naesten altid
+# "betaler sig", og udvande signalet. Saet som en modul-konstant (ikke
+# hardcodet dybt i logikken nedenfor) saa fremtidige konsignations-kilder
+# er lette at tilføje her uden at røre selve bundle-algoritmen.
+NON_BUNDLEABLE_SOURCES = {"sellpy"}
+
 
 def _seller_key(match: dict) -> str:
     """Saelger-ID hvis vi kunne udtraekke det (se sources/reshopper.py og
@@ -34,9 +45,17 @@ def _seller_key(match: dict) -> str:
 
 def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> list[dict]:
     """Grupperer matches pr. saelger og beregner bundle-oekonomi.
-    Returnerer bundle-dicts sorteret efter stoerst besparelse pr. item foerst."""
+    Returnerer bundle-dicts sorteret efter stoerst besparelse pr. item foerst.
+
+    J5: matches fra NON_BUNDLEABLE_SOURCES (fx Sellpy, konsignation) danner
+    ALDRIG en bundle, uanset antal -- de springes over her og optraeder
+    derfor KUN i Matches-listen (all_matches), aldrig i Bundles. Se
+    modulets NON_BUNDLEABLE_SOURCES-konstant og BACKLOG.md's J5-fund."""
     by_seller = defaultdict(list)
     for m in matches:
+        source = (m.get("source") or "").strip().lower()
+        if source in NON_BUNDLEABLE_SOURCES:
+            continue
         by_seller[_seller_key(m)].append(m)
 
     bundles = []

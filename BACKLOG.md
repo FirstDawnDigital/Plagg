@@ -30,7 +30,64 @@ G3    Beskedudkast + reservation        WSJF 2.0      TODO
 ```
 
 Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
-G8 (Sellpy-kilde), + bundle-definition strammet + mobil-layout-fix.
+G8 (Sellpy-kilde), J4-J7 (kritikrunde 2), + bundle-definition strammet +
+mobil-layout-fix.
+
+**Kritikrunde 2026-07-10 (Opus, teknisk + UX) — fund der udløste J4-J7:**
+- **J4 (kritisk):** `wishlist.source=turso` gør Google Sheetets
+  "Ønskeseddel"-fane reelt død (læses aldrig mere), men intet i Sheetet
+  eller dokumentationen siger det -- redigerer Esbens kone fanen der
+  (gammel vane), sker der intet, lydløst. `README.md`/`wishlist.py`s
+  docstrings er også forældede (nævner kun sheet/local, ikke turso).
+- **J5 (moderat):** Sellpy er konsignation (alt "sælges" under ét
+  fælles navn "Sellpy") -- bundling.py grupperer derfor usammenhængende
+  Sellpy-fund (fx leggings+duplo+jakke) til én kunstig "bundle" der
+  næsten altid "betaler sig", og udvander signalet. Bekræftet i live
+  data (run_id=20: 11 usammenhængende items i én "Sellpy"-bundle).
+- **J6 (moderat):** "kan tage flere minutter" undersælger stadig et
+  14-minutters-vindue (bekræftet i log efter Sellpy blev tilføjet).
+- **J7 (lav):** `sources/sellpy.py`s docstring lover en
+  voksentøjs-udelukkelse der ikke holder for størrelsesløse ønsker
+  (G7-regression) + generel README/config-kommentar-doc-rot.
+- **Positivt bekræftet:** ingen mobil-overflow, størrelses-udelukkelse
+  virker korrekt for ønsker MED størrelse.
+- **Erkendt spænding, IKKE en bug:** ønskeseddel øverst (Esben-ønske)
+  betyder en travl bruger scroller forbi 7 ønsker + formular før
+  bundles/matches. Løses ved at flytte TL;DR-banneret til at stå FØR
+  ønskesedlen (handl-nu-signalet synligt med det samme), uden at rykke
+  selve ønskeseddel-sektionen væk fra toppen igen.
+
+**J4-J7 leveret (2026-07-10, udviklingsrunde i Sonnet):**
+- **J4:** `wishlist.py`/`README.md`s docstrings opdateret til at nævne
+  alle tre kilder (sheet/local/turso) med turso som aktiv. En rød,
+  iøjnefaldende advarsel er skrevet DIREKTE ind i det live Google
+  Sheets "Ønskeseddel"-fane (række 1via gspread): "⚠️ Denne fane bruges
+  ikke længere til at finde ønsker -- rediger i webappen:
+  https://firstdawndigital.github.io/Plagg/". `load_from_sheet()` er
+  gjort defensiv mod dette (detekterer advarselsrækken, læser header
+  fra række 2 i stedet) så den ikke-aktive "sheet"-fallback-vej stadig
+  virker korrekt hvis nogen bevidst skifter tilbage. Bekræftet ved at
+  læse både advarselscellen og de originale 2 ønsker tilbage fra det
+  live ark.
+- **J5:** Ny konstant `NON_BUNDLEABLE_SOURCES = {"sellpy"}` i
+  `bundling.py` -- kilder her danner ALDRIG en bundle uanset antal
+  matches (optræder kun i Matches-listen). Regressionstestet: Reshopper/
+  DBA bundler stadig korrekt ved 2+ items, Sellpy danner 0 bundles selv
+  ved 3 usammenhængende matches.
+- **J6:** Statustekst rettet til "kan tage op til 15 min." i
+  `trigger_watcher.py` og `sheets_output.py`s Kontrolpanel-hjælpetekst,
+  PLUS den live Sheet-celle (C2) opdateret direkte og læst tilbage som
+  bekræftelse.
+- **J7:** `sources/sellpy.py`s docstring præciseret -- størrelses-
+  udelukkelse gælder kun når ØNSKET selv har en størrelse, ikke en
+  generel voksentøjs-garanti (G7-regression). README nævner nu Sellpy
+  som tredje kilde konsekvent.
+- **TL;DR-flytning:** `#tldr-banner` flyttet til at stå lige efter
+  topbar'en (FØR ønskeseddel-sektionen, som selv forbliver først).
+  Bekræftet med Playwright (mobil 390×844, 7 ønsker): banner ved y=68px,
+  ønskeseddel-sektion starter y=133px -- handl-nu-signalet er synligt
+  uden scroll.
+- Alle Python-filer bekræftet kompilerende (`py_compile`) inden commit.
 
 **G8 leveret (2026-07-10):** `sources/sellpy.py` bygget efter samme
 to-fase-kontrakt som Reshopper/DBA, men `fetch_details()` er no-op (alt

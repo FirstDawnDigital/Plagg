@@ -1,11 +1,14 @@
-# Personal Shopper — brugt børnetøj (Reshopper + DBA)
+# Personal Shopper — brugt børnetøj (Reshopper + DBA + Sellpy)
 
-Overvaager Reshopper.com OG DBA.dk for annoncer der matcher en ønskeseddel,
-beregner **bundling pr. sælger PR. KILDE** (fragt-økonomi — se
+Overvaager Reshopper.com, DBA.dk OG Sellpy.dk for annoncer der matcher en
+ønskeseddel, beregner **bundling pr. sælger PR. KILDE** (fragt-økonomi — se
 `bundling.py`; en Reshopper- og en DBA-sælger grupperes ALDRIG sammen,
-selv med samme navn) og skriver resultatet til et Google Sheet-dashboard.
-MVP for branch "Brugt børnetøj", byggeagenten Esben satte i gang
-2026-07-09. DBA blev tilføjet som ny kilde (G1) samme dag.
+selv med samme navn) og skriver resultatet til et Google Sheet-dashboard
+(og til den hostede webapp, se "Ønskeseddel" nedenfor). MVP for branch
+"Brugt børnetøj", byggeagenten Esben satte i gang 2026-07-09. DBA blev
+tilføjet som ny kilde (G1) samme dag, Sellpy (G8) 2026-07-10 -- Sellpy er
+konsignation (fælles "sælger") og danner derfor ALDRIG en bundle, se
+`bundling.py`'s `NON_BUNDLEABLE_SOURCES`.
 
 Se `../personal-shopper-brief.md` for den fulde opgavebeskrivelse,
 `BACKLOG.md` for prioritering + F1-spikens fund om Reshoppers tekniske
@@ -97,16 +100,28 @@ for stien der bruges.
 
 ## Ønskeseddel
 
-To kilder, valgt via `wishlist.source` i `config.yaml`:
+**VIGTIGT (G8, 2026-07-10):** `wishlist.source` i `config.yaml` er nu
+`"turso"` i produktion — ønskesedlen redigeres i **webappen**
+(https://firstdawndigital.github.io/Plagg/), IKKE i Google Sheetets
+"Ønskeseddel"-fane. Den fane laeses ALDRIG mere af `monitor.py` saa laenge
+`source: "turso"` staar i config.yaml (se J4 i BACKLOG.md's kritikrunde
+2026-07-10) — der staar en advarsel skrevet direkte ind i selve fanen i det
+live Sheet om dette. Redigér KUN Sheet-fanen hvis `wishlist.source` bevidst
+saettes tilbage til `"sheet"`.
 
-- **`"local"`** (standard) — `data/wishlist.local.yaml`. Indeholder de to
-  officielle valideringsposter fra briefen: Birkholm leggings str. 104,
-  Zara bukser str. 104. Bruges til at unit-teste matching/bundling uden
-  Sheets-adgang.
-- **`"sheet"`** — en fane (standard: `Ønskeseddel`) i samme Google Sheet som
-  dashboardet, med kolonnerne Type / Mærke / Størrelse / Maks-pris / Stand
-  (rækkefølge ligegyldig, kolonnenavne matches case-insensitivt, se
-  `wishlist.py:COLUMN_ALIASES`). Opret fanen manuelt i arket foerste gang.
+Tre kilder, valgt via `wishlist.source` i `config.yaml`:
+
+- **`"turso"`** (AKTIV i produktion) — den hostede Turso-database bag
+  webappen. CRUD sker via webappens `/api/wishlist`-endpoints
+  (`turso_io.py`), ikke via denne kodebase direkte.
+- **`"local"`** — `data/wishlist.local.yaml`. Indeholder de to officielle
+  valideringsposter fra briefen: Birkholm leggings str. 104, Zara bukser
+  str. 104. Bruges til at unit-teste matching/bundling uden Sheets/Turso-
+  adgang, og som fallback hvis den valgte kilde ikke kan naas.
+- **`"sheet"`** (IKKE laengere aktiv i produktion) — en fane (standard:
+  `Ønskeseddel`) i samme Google Sheet som dashboardet, med kolonnerne
+  Type / Mærke / Størrelse / Maks-pris / Stand (rækkefølge ligegyldig,
+  kolonnenavne matches case-insensitivt, se `wishlist.py:COLUMN_ALIASES`).
 
 ## Kør
 
@@ -389,7 +404,10 @@ arbejder udelukkende på den normaliserede item-model og er 100% platforms-
 agnostiske allerede nu — **bekræftet i praksis ved G1 (DBA)**: `dba.py`
 blev tilføjet uden at røre `matching.py` og med kun ét lille (men vigtigt)
 rettelse i `bundling.py` (kilde-praefiks i `_seller_key`, se BACKLOG.md).
-Sellpy/Vinted er stadig ikke bygget — Sellpy er tidligere afvist pga.
-konsignationsmodellen (fælles fragt på tværs af HELE markedet, ikke pr.
-sælger, se BACKLOG.md's G1-fund), saa den kraever formentlig en anden
-bundling-model end `_seller_key`, hvis den nogensinde tages op igen.
+Sellpy blev bygget (G8, 2026-07-10) via Sellpy.dk's offentlige Algolia-
+soegeendpoint (se `sources/sellpy.py`) og indgaar i `SOURCE_MODULES`.
+Konsignationsmodellen (fælles fragt/"sælger" for HELE Sellpy-markedet, ikke
+pr. individuel sælger) betyder at Sellpy-matches ALDRIG bundlede (J5-fix,
+kritikrunde 2026-07-10) — se `bundling.py`'s `NON_BUNDLEABLE_SOURCES`,
+Sellpy optræder derfor kun i Matches-listen, aldrig i Bundles. Vinted er
+stadig ikke bygget.

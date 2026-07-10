@@ -1,9 +1,19 @@
-"""Ønskeseddel-indlæsning: Google Sheet-fane (foretrukket i drift) eller lokal
-YAML-fallback (test/uden Sheets-adgang). Se personal-shopper-brief.md §4.
+"""Ønskeseddel-indlæsning: TRE mulige kilder, valgt via config['wishlist']['source']:
+'sheet' (Google Sheet-fane), 'local' (YAML-fallback, test/uden Sheets-adgang)
+eller 'turso' (den hostede webapp/database). Se personal-shopper-brief.md §4.
 
-Sheet-fanen forventes at have kolonner svarende til COLUMN_ALIASES nedenfor --
-raekkefoelge er ligegyldig, kolonnenavne matches case-insensitivt saa Esbens
-kone kan skrive "Mærke" eller "Brand" uden at det knaekker noget.
+VIGTIGT (G8, 2026-07-10): 'turso' er den AKTIVE kilde i produktion (se
+config.yaml's wishlist.source) -- Esben og hans kone redigerer ønskesedlen i
+webappen (https://firstdawndigital.github.io/Plagg/), IKKE laengere i Google
+Sheetets "Ønskeseddel"-fane. Den fane laeses derfor ALDRIG af load_wishlist()
+saa laenge source=turso -- se J4 i BACKLOG.md's kritikrunde 2026-07-10 og
+advarslen skrevet direkte ind i selve Sheet-fanen (sheets_output.py-lignende
+gspread-kald, koert som et engangs-script).
+
+Sheet-fanen (naar 'sheet' rent faktisk bruges) forventes at have kolonner
+svarende til COLUMN_ALIASES nedenfor -- raekkefoelge er ligegyldig,
+kolonnenavne matches case-insensitivt saa Esbens kone kan skrive "Mærke"
+eller "Brand" uden at det knaekker noget.
 """
 import logging
 
@@ -79,7 +89,26 @@ def load_from_sheet(spreadsheet, tab_name: str) -> list[dict]:
             tab_name,
         )
         return []
-    records = ws.get_all_records()
+
+    # J4 (kritikrunde 2026-07-10): raekke 1 i den live fane er nu en rød
+    # "denne fane bruges ikke laengere"-advarsel (se BACKLOG.md), ikke
+    # kolonne-headeren -- den rigtige header (Type/Mærke/...) staar i raekke 2.
+    # Hvis nogen bevidst saetter wishlist.source tilbage til "sheet" skal denne
+    # fallback-vej stadig virke uden at fejltolke advarslen som en kolonne-
+    # header, saa vi detekterer den og skubber headeren én raekke ned.
+    head_row = 1
+    try:
+        first_cell = str(ws.acell("A1").value or "")
+        if first_cell.strip().startswith("⚠️"):
+            head_row = 2
+            logger.info(
+                "Ønskeseddel: advarselsraekke fundet i raekke 1 -- bruger raekke %d som kolonne-header",
+                head_row,
+            )
+    except Exception:
+        pass  # kan ikke laese A1 -- fald tilbage til standard head=1, resten af funktionen fanger evt. tomme resultater
+
+    records = ws.get_all_records(head=head_row)
 
     items = []
     skipped = 0
@@ -104,9 +133,13 @@ def load_from_sheet(spreadsheet, tab_name: str) -> list[dict]:
 
 
 def load_wishlist(config: dict, spreadsheet=None) -> list[dict]:
-    """Indlaeser oenskesedlen ud fra config['wishlist']['source'] ('sheet' eller 'local').
-    Falder automatisk tilbage til lokal fil hvis 'sheet' er valgt men intet
-    spreadsheet er tilgaengeligt (fx foerste koersel foer Sheets-opsaetning er paa plads)."""
+    """Indlaeser oenskesedlen ud fra config['wishlist']['source'] -- 'sheet', 'local'
+    eller 'turso'. PRODUKTION bruger 'turso' (se config.yaml) -- Sheetets
+    "Ønskeseddel"-fane laeses IKKE naar source=turso, se modulets docstring og
+    BACKLOG.md's J4-fund. Falder automatisk tilbage til lokal fil hvis 'sheet'
+    er valgt men intet spreadsheet er tilgaengeligt, eller hvis 'turso' er
+    valgt men Turso-credentials mangler (fx foerste koersel foer opsaetning
+    er paa plads)."""
     wl_cfg = config.get("wishlist", {})
     source = wl_cfg.get("source", "local")
 

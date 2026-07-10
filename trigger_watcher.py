@@ -184,10 +184,12 @@ def poll_once(backend) -> bool:
 
     logger.info("trigger_watcher: 'Kør nu' er sat -- starter koersel")
     try:
-        # "1-3 min." viste sig for optimistisk -- reelle kørsler 2026-07-10
-        # spændte fra 2,5 til 14 min. (skalerer med antal oenskeseddel-items ×
-        # kilder × 5-15s tilfaeldig detalje-opslags-forsinkelse pr. kandidat).
-        backend.set_status("Kører... (kan tage flere minutter)")
+        # J6 (kritikrunde 2026-07-10): "kan tage flere minutter" var STADIG for
+        # optimistisk -- reelle kørsler 2026-07-10 spændte fra 2,5 til 14 min.
+        # (skalerer med antal oenskeseddel-items × kilder (nu ogsaa Sellpy) ×
+        # 5-15s tilfaeldig detalje-opslags-forsinkelse pr. kandidat). "op til
+        # 15 min." er et aerligt, rundt loft der daekker det observerede vindue.
+        backend.set_status("Kører... (kan tage op til 15 min.)")
     except Exception:
         logger.exception("trigger_watcher: kunne ikke saette Status='Kører...' (fortsaetter alligevel)")
 
