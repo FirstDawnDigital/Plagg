@@ -282,7 +282,9 @@ def ensure_control_tab(spreadsheet, tab_name: str = "Kontrolpanel"):
         ["Kontrolpanel", "", "", ""],
         ["Kør nu", False,
          "Sæt hak for at køre en overvågning NU (ellers køres der automatisk 2x dagligt). "
-         "Kan tage op til 15 sek. før Status skifter til 'Kører...', og kørslen tager typisk 1-3 minutter.", ""],
+         "Kan tage op til 15 sek. før Status skifter til 'Kører...'. Selve kørslen "
+         "kan tage flere minutter og af og til over et kvarter, afhængig af hvor "
+         "meget nyt der skal tjekkes.", ""],
         ["Status", CONTROL_STATUS_READY, "", ""],
         ["Sidst kørt", "", "", ""],
     ], range_name="A1", value_input_option="USER_ENTERED")
