@@ -6,7 +6,7 @@
 # Ønskeseddel: Google Sheet-fane (foretrukket i drift) eller lokal fil (test/fallback)
 # ─────────────────────────────────────────────
 wishlist:
-  source: "sheet"               # "sheet" eller "local" -- "sheet" er nu det rigtige ark, Esbens kone redigerer selv fanen
+  source: "turso"               # "sheet" | "local" | "turso" -- G8: skiftet til Turso 2026-07-10, Esben redigerer nu ønskesedlen i webappen, ikke Sheetet
   sheet_tab_name: "Ønskeseddel" # fane-navn i dashboard-sheetet naar source: sheet
   local_path: "data/wishlist.local.yaml"
 
