@@ -89,10 +89,17 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
             "local_pickup_bonus": (not shipping_is_assumed) and shipping == 0,
         })
 
+    # En "bundle" giver kun mening med 2+ items -- ellers er der ingen delt
+    # fragt at spare, og det er reelt bare et enkelt match (som allerede staar
+    # i Matches-listen). Enkelt-item-saelgere frafiltreres her, saa
+    # bundle-tallet baade i webappen, Sheets og status-teksten er ægte antal
+    # bundles (Esben-oenske 2026-07-10). Enkelt-matchene mistes IKKE -- de er
+    # stadig i all_matches / Matches-visningen.
+    sellers_with_match = len(bundles)
+    bundles = [b for b in bundles if b["item_count"] >= 2]
     bundles.sort(key=lambda b: (-b["savings_per_item"], -b["item_count"]))
-    worth_it_count = sum(1 for b in bundles if b["bundle_worth_it"])
     logger.info(
-        "Bundling: %d saelger(e) med mindst ét match, heraf %d med 2+ items (reel bundling)",
-        len(bundles), worth_it_count,
+        "Bundling: %d saelger(e) med mindst ét match, heraf %d ægte bundle(s) (2+ items)",
+        sellers_with_match, len(bundles),
     )
     return bundles

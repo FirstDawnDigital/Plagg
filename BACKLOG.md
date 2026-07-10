@@ -22,12 +22,51 @@ bundles) -- opdateres først med FRISK data når Esben aktivt sætter
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
+G8    Sellpy som match-kilde            Size 3        BYGGES
+G9    Vinted som match-kilde            Size 4        TODO (efter G8)
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G6    Stand-baseret filtrering/nedton   WSJF ?        TODO
 G3    Beskedudkast + reservation        WSJF 2.0      TODO
+G7    Størrelse valgfri (børneting)     -             DONE (2026-07-10)
 G5    Webapp med samlet UI              WSJF 1.1      LIVE, se G5-status
 ```
+
+**G7 leveret (2026-07-10):** størrelse er ikke længere påkrævet.
+`matching._size_rank()` returnerer "eksakt" ved tom ønske-størrelse (så
+den ikke blokerer eller trækker ned til nær-match), `wishlist.py` kræver
+kun type, `worker.js` kun type-validering (deployet), `docs/index.html`
+markerer feltet valgfrit og håndterer tom størrelse i validering+visning.
+Regressionstestet: tøj med størrelse opfører sig præcis som før (104
+eksakt, 98 nær, 80 udelukket). Bekræftet live at et størrelsesløst ønske
+(fx "lego duplo") kan tilføjes uden fejl. Baggrund: Esben testede en
+Lego-gravko der gav 0 matches -- kodegennemgang viste at fase 1-precheck
+hårdt krævede en tøj-størrelse på stigen 50-176, så alt sizeløst blev
+filtreret væk.
+
+**G8/G9 (ny 2026-07-10):** Esben ønsker Sellpy + Vinted som EKSTRA
+match-kilder -- ikke primært for bundling, men for at ØGE UDBUDDET af
+fund og give bedre grundlag for prissammenligning. Bundling valgfri/NA.
+
+Dataadgangs-spike (2026-07-10) bekræftet med rigtige kald, BEGGE uden
+login (modsat DBA):
+- **Sellpy (G8, Size 3, byg først):** offentligt Algolia-kald `POST
+  https://3lxsu2dn7t-dsn.algolia.net/1/indexes/*/queries` (app-id
+  `3LXSU2DN7T`, dansk søge-key `380077912d5cdc2bebf67d4b4ad10a30`),
+  index `prod_marketItem_da_relevance` (IKKE `_saleStartedAt_desc` --
+  det gav solgte varer uden pris). ALT i hittet: `price_DK.amount` (øre,
+  /100), `metadata.brand/size/condition/type`, `isOnShelf` (filtrér
+  klient-side), item-URL `sellpy.dk/item/<objectID>`. robots.txt
+  `Allow: /`, ingen bot-wall. Konsignationsmodel (ingen sælger-bundling).
+- **Vinted (G9, Size 4):** anonym cookie-priming (`GET vinted.dk/` →
+  cookies) + `GET vinted.dk/api/v2/catalog/items?search_text=<term>` →
+  ren JSON. Ingen login. ALT på liste-niveau: `price.amount`,
+  `brand_title`, `size_title`, `status` (stand), `user`, `url`.
+  robots.txt tillader `/catalog`+`/api/v2` for normal UA (men
+  Disallow: / for AI-bots, + ToS-klausuler om "no automated
+  transactions" -- samme gråzone som Reshopper/DBA, Esben-godkendt
+  tilgang). DataDome-beskyttelse -> skånsom kadence nødvendig.
+  Cross-border EU-udbud med DKK-omregnede priser (fragt varierer).
 
 **G6 (ny 2026-07-10):** Ønskesedlens "Stand"-felt (fx "som nyt"/"må
 gerne være slidt") er i dag et rent fritekstfelt der IKKE bruges til

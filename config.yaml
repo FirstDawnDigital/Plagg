@@ -63,6 +63,18 @@ dba:
   max_results_per_term: 10
 
 # ─────────────────────────────────────────────
+# Sellpy-adfaerd (G8: Sellpy som ny kilde)
+# ─────────────────────────────────────────────
+sellpy:
+  # ÉT offentligt Algolia-soegekald pr. term -- ingen browser, login eller
+  # bot-wall (se sources/sellpy.py's docstring og BACKLOG.md's G8-fund).
+  # Algolia app-id/api-key/index er hardcodede konstanter i sources/sellpy.py
+  # (samme princip som Reshopper/DBA's hardcodede URL'er) -- kun maengde/timeout
+  # er konfigurerbart her.
+  max_results_per_term: 30   # Algolia hitsPerPage pr. soegeterm
+  timeout_s: 20              # HTTP-timeout paa Algolia-kaldet (sekunder)
+
+# ─────────────────────────────────────────────
 # Bundling / fragt-oekonomi
 # ─────────────────────────────────────────────
 bundling:
