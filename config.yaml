@@ -109,4 +109,4 @@ turso:
 # Esben selv har bedt om det.
 # ─────────────────────────────────────────────
 output:
-  targets: ["sheet"]   # ["sheet"] | ["turso"] | ["sheet", "turso"]
+  targets: ["sheet", "turso"]   # ["sheet"] | ["turso"] | ["sheet", "turso"] -- BEGGE aktive fra 2026-07-10 efter Esbens ok, saa webappen faar friske data

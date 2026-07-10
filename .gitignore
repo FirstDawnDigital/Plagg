@@ -11,6 +11,10 @@ trigger_watcher.log
 trigger_watcher.log.*
 trigger_watcher_stdout.log
 trigger_watcher_stderr.log
+trigger_watcher_turso.log
+trigger_watcher_turso.log.*
+trigger_watcher_turso_stdout.log
+trigger_watcher_turso_stderr.log
 spreadsheet_id.txt
 matches_fallback.csv
 bundles_fallback.csv

@@ -236,10 +236,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Personal Shopper -- Trigger-fra-Sheet-watcher")
     parser.add_argument("--once", action="store_true", help="Tjek checkbox-cellen ÉN gang og afslut (til test)")
     parser.add_argument("--poll-interval-s", type=float, default=None, help="Override config.yaml's trigger.poll_interval_s (til test)")
+    parser.add_argument("--source", choices=["sheet", "turso"], default=None, help="Override config.yaml's trigger.source -- lader flere trigger_watcher-processer koere side om side (én pr. backend)")
+    parser.add_argument("--log-path", default=None, help="Override log-fil (til at koere flere instanser uden at dele samme logfil)")
     args = parser.parse_args()
 
     config = monitor.load_config()
-    setup_logging(config.get("trigger", {}).get("log_path", "trigger_watcher.log"))
+    setup_logging(args.log_path or config.get("trigger", {}).get("log_path", "trigger_watcher.log"))
 
     trigger_cfg = config.get("trigger", {})
     if not trigger_cfg.get("enabled", True):
@@ -249,8 +251,9 @@ def main() -> int:
     # G5: backend vaelges ud fra trigger.source -- default "sheet" hvis
     # noeglen mangler (bagudkompatibilitet med config.yaml-filer skrevet foer
     # G5). Kun "turso" aendrer noget her; "sheet" er 100% samme opsaetning
-    # som foer G5.
-    trigger_source = trigger_cfg.get("source", "sheet")
+    # som foer G5. --source override lader to processer koere side om side,
+    # én pr. backend, uden at skulle vedligeholde to config-filer.
+    trigger_source = args.source or trigger_cfg.get("source", "sheet")
 
     if trigger_source == "turso":
         turso_cfg = config.get("turso", {})

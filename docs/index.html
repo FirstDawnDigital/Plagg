@@ -34,14 +34,14 @@
     position: sticky; top: 0; z-index: 50;
     background: var(--accent); color: #fff;
     padding: 10px 14px;
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     box-shadow: 0 2px 6px rgba(0,0,0,0.15);
   }
   #topbar h1 { font-size: 17px; font-weight: 700; flex-shrink: 0; }
   #status-pill {
     font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
-    background: #334155; color: #e2e8f0; white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; max-width: 140px;
+    background: #334155; color: #e2e8f0; white-space: normal;
+    line-height: 1.3; flex: 1 1 auto; min-width: 0;
   }
   #status-pill.ok { background: var(--green-bg); color: var(--green); }
   #status-pill.busy { background: var(--yellow-bg); color: var(--yellow); }
@@ -97,11 +97,21 @@
   }
   .bundle-stats b { color: var(--text); }
   .bundle-items { display: flex; flex-direction: column; gap: 4px; }
+  .bundle-item-row {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
   .bundle-items a {
     font-size: 13px; color: var(--blue); text-decoration: none;
-    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
   }
   .bundle-items a:hover { text-decoration: underline; }
+  .item-size-tag { font-size: 12px; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
+  .item-near-tag {
+    font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--yellow-bg); color: var(--yellow); text-transform: uppercase;
+    letter-spacing: 0.3px; flex-shrink: 0; white-space: nowrap;
+  }
 
   /* ── Match cards ── */
   .match-card { display: flex; flex-direction: column; gap: 4px; }
@@ -110,6 +120,11 @@
   .match-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
   .match-meta b { color: var(--text); }
   .stand-warn { color: var(--red); font-weight: 700; }
+  /* H4 (webapp-parallel til sheets_output.py's _short_item_ref): kort, diskret
+     item-ref (sidste 6 tegn af item_id) saa to ellers-identiske matches
+     (samme titel/pris/saelger, forskellig annonce) ikke ligner en duplikat-bug. */
+  .item-ref { font-size: 11px; color: var(--muted); opacity: 0.8; }
+  .load-error-hint { color: var(--red); }
 
   /* ── Wishlist ── */
   .wl-row {
@@ -311,6 +326,14 @@
     if (s.includes("dba")) return "badge-dba";
     return "badge-source";
   }
+  // Samme princip som sheets_output.py's _short_item_ref(): sidste 6 tegn af
+  // item_id med et "…"-praefiks, saa to matches der ellers ser identiske ud
+  // (samme titel/pris/saelger) kan skelnes som to forskellige annoncer.
+  function shortItemRef(itemId) {
+    const ref = String(itemId || "").trim();
+    if (!ref) return "";
+    return ref.length > 6 ? `…${ref.slice(-6)}` : ref;
+  }
 
   // ── Status-pil + polling ─────────────────────────────────────────────────
   let pollTimer = null;
@@ -437,7 +460,19 @@
       const itemLinks = items.map(it => {
         const label = escapeHtml(it.title || it.brand || it.size || "annonce");
         const price = it.price != null ? ` — ${fmtKr(it.price)}` : "";
-        return `<a href="${escapeHtml(it.url || '#')}" target="_blank" rel="noopener">${label}${price}</a>`;
+        // H4/H5-parallel (webapp-version): vis stoerrelse pr. item og markér
+        // items der ikke er "eksakt" (fx nabo-stoerrelse) med en lille
+        // "nær match"-tag, saa blandede stoerrelser i samme bundle er synlige
+        // uden at skulle taelle efter.
+        const sizeTag = it.size ? `<span class="item-size-tag">str. ${escapeHtml(it.size)}</span>` : "";
+        const isNear = it.match_rank && it.match_rank !== "eksakt";
+        const nearTag = isNear ? `<span class="item-near-tag">nær match</span>` : "";
+        const refTag = shortItemRef(it.item_id)
+          ? `<span class="item-ref">${escapeHtml(shortItemRef(it.item_id))}</span>` : "";
+        return `<div class="bundle-item-row">
+          <a href="${escapeHtml(it.url || '#')}" target="_blank" rel="noopener">${label}${price}</a>
+          ${sizeTag}${nearTag}${refTag}
+        </div>`;
       }).join("");
       return `
         <div class="bundle-card">
@@ -483,22 +518,37 @@
             ${m.brand ? `<span>${escapeHtml(m.brand)}</span>` : ""}
             ${standText ? `<span class="${isBad ? 'stand-warn' : ''}">${isBad ? '⚠ ' : ''}${escapeHtml(standText)}</span>` : ""}
             ${m.seller_name ? `<span>Sælger: ${escapeHtml(m.seller_name)}</span>` : ""}
+            ${shortItemRef(m.item_id) ? `<span class="item-ref">${escapeHtml(shortItemRef(m.item_id))}</span>` : ""}
           </div>
         </div>
       `;
     }).join("");
   }
 
+  // G6-FIX (kritikrunde-fund #3): tidligere blev der IKKE vist nogen
+  // fejlbesked hvis Workeren fejlede (fx en 500 fra /api/matches, eller en
+  // netværksfejl) -- listerne blev bare hængende på "Henter…" for evigt.
+  // Nu rendres en synlig, kort fejlbesked direkte i den ramte liste, uden at
+  // crashe resten af siden (samme moenster som loadWishlist()'s fejlvisning).
+  const LOAD_ERROR_HTML = '<div class="empty-hint load-error-hint">Kunne ikke hente data -- prøv at genindlæse siden.</div>';
+
   async function loadMatchesAndBundles() {
+    const bundlesEl = document.getElementById("bundles-list");
+    const matchesEl = document.getElementById("matches-list");
     try {
       const [bRes, mRes] = await Promise.all([
         apiFetch("/api/bundles"),
         apiFetch("/api/matches"),
       ]);
       if (bRes.ok) renderBundles(await bRes.json());
+      else bundlesEl.innerHTML = LOAD_ERROR_HTML;
       if (mRes.ok) renderMatches(await mRes.json());
+      else matchesEl.innerHTML = LOAD_ERROR_HTML;
     } catch {
-      // netværksfejl -- ignorér, lister forbliver som de var
+      // netværksfejl (fx Worker uopnåelig) -- vis fejlbesked i stedet for at
+      // blive hængende på "Henter…" for evigt.
+      bundlesEl.innerHTML = LOAD_ERROR_HTML;
+      matchesEl.innerHTML = LOAD_ERROR_HTML;
     }
   }
 

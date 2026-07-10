@@ -5,8 +5,17 @@
 > Hold linjer under ~70 tegn ved redigering. WSJF = CoD / Size, CoD = BV+TC+RR
 > (hver 1–10). Fuld kontekst: se [personal-shopper-brief.md](../personal-shopper-brief.md)
 
-**Live demo/dashboard:** https://docs.google.com/spreadsheets/d/1EjCrvQmHcTz6MAhSYhQYPCfbB9rTKyscMJJ5ZtNPjO4
+**Live demo/dashboard (aktivt i brug):** https://docs.google.com/spreadsheets/d/1EjCrvQmHcTz6MAhSYhQYPCfbB9rTKyscMJJ5ZtNPjO4
 (faner "Matches" og "Bundles", opdateret 2026-07-09 — H1-H5 leveret, se nedenfor)
+
+**G5-webapp (live, men IKKE endnu koblet til friske kørsler):** https://firstdawndigital.github.io/Plagg/
+(adgangskode "klematis"). Kode pushet til `FirstDawnDigital/Plagg` (repo
+gjort offentligt 2026-07-10, da org-planen ikke understøtter Pages fra
+private repos -- ingen hemmeligheder i koden, data ligger i Turso, ikke
+i repoet). Viser i dag data fra Fase 4-testkørslerne (12 matches, 5
+bundles) -- opdateres først med FRISK data når Esben aktivt sætter
+`output.targets`/`trigger.source`/`wishlist.source` til `"turso"` i
+`config.yaml` (se G5-status).
 
 ## Aktiv backlog (næste øverst)
 
@@ -15,9 +24,21 @@ ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
+G6    Stand-baseret filtrering/nedton   WSJF ?        TODO
 G3    Beskedudkast + reservation        WSJF 2.0      TODO
-G5    Webapp med samlet UI              WSJF 1.1      BYGGET, ikke aktiveret/pushet (se G5-status)
+G5    Webapp med samlet UI              WSJF 1.1      LIVE, se G5-status
 ```
+
+**G6 (ny 2026-07-10):** Ønskesedlens "Stand"-felt (fx "som nyt"/"må
+gerne være slidt") er i dag et rent fritekstfelt der IKKE bruges til
+matching -- bekræftet ved kodegennemgang af `matching.py`, feltet nævnes
+kun i en kommentar, ingen filter-/nedtonings-logik eksisterer. Esben har
+bedt om at bevare feltet og bygge rigtig funktionalitet senere (ikke nu):
+filtrér/nedton fund hvor annoncens stand tydeligt afviger fra det ønskede
+(fx udeluk "defekt" hvis ønsket stand er "som nyt"). Ikke scoret endnu --
+kræver et design af "stand-kompatibilitet" (hvilke kombinationer er OK/
+ikke-OK), og fortolkning af Reshopper/DBA's egne stand-labels (se
+`sources/reshopper.py`/`sources/dba.py`s stand-udtræk).
 
 H-serien (fra demo-kritik) er leveret, se status-tabellen nedenfor. Den laa
 foran G-serien (brief §10-idéer) fordi den rettede selve MVP-outputtet og var
@@ -29,20 +50,21 @@ re-scores naar vi kender faktisk brugsmønster over tid.
 ```
 Emne                                   Type          Ejer
 --------------------------------------  ------------  ------------
-G5: git push til GitHub + aktivér     Beslutning    Esben
-  som daglig dashboard (config flip)
+G5: aktivér som dagligt dashboard      Beslutning    Esben
+  (config-flip til "turso", se G5-status)
 G2 -- notifikationer                   Kvalificering Esbens kone
 G3 -- beskedudkast/reservation         Kvalificering Esbens kone
 G4 -- region-filtrering                Prioritering  Esben
 launchd: 2x-dagligt scheduled task     Drift         Esben (godkend)
 launchd: trigger_watcher.py            Drift         Esben (godkend)
 DBA-session (.dba_storage_state.json)  Kendt risiko  Esben (ved udløb)
-Git: committe + push til GitHub        Drift         Claude/Esben
 ```
 
-- **G5-arkitektur:** største udestående — kræver et designvalg om
-  SQLite-skema for matches/bundles (se G5-status ovenfor) før noget kan
-  bygges. Godt udgangspunkt for dagens fælles planlægning.
+- **G5:** kode pushet, webapp live på https://firstdawndigital.github.io/Plagg/
+  (repo `FirstDawnDigital/Plagg`, gjort offentligt 2026-07-10 for at
+  kunne bruge GitHub Pages på org-planen). Eneste resterende skridt er
+  Esbens egen beslutning om at aktivere Turso-sporet som det der reelt
+  opdateres ved fremtidige kørsler (config-flip, se G5-status).
 - **G2/G3:** bevidst ikke bygget — begge kræver at Esbens kone har brugt
   systemet et stykke tid først, så kvalificeringen er baseret på reel
   brug, ikke gæt.
@@ -134,8 +156,8 @@ H-serien) fandt 5 problemer, 4+1 rettet med det samme:
 - Sletning af ønskeseddel-item manglede bekræftelse -- tilføjet
   `confirm()`-dialog.
 - (Bonus) Slet-knappens tap-target forstørret til 44px min.
-IKKE pushet til GitHub endnu (bevidst, jf. planens byggerækkefølge --
-push kommer efter Fase 4).
+Pushet til GitHub 2026-07-10 efter Fase 4 + kritikrunde var færdig,
+som planlagt.
 
 **Fase 4 leveret (2026-07-10):** `config.yaml` (nye additive `turso:`/
 `output:`-sektioner + `trigger.source`), `monitor.py` (Turso-skema
@@ -214,13 +236,18 @@ Worker (inkl. en direkte reproduktion af race-scenariet og en monkeypatch-
 test af "alle kilder fejler"-stien via en rigtig `monitor.main()`-kørsel).
 `config.yaml` bekræftet tilbage til sikre defaults efter alt testarbejde.
 
-**G5 er nu funktionelt komplet OG teknisk gennemgået (Fase 1-4 + 2
-kritikrunder), men IKKE pushet til GitHub endnu og IKKE aktiveret som
-Esbens daglige dashboard** -- det kræver et bevidst valg af Esben (flip
-`output.targets`/`trigger.source`/`wishlist.source` til `"turso"`, og en
-eksplicit beslutning om at pushe koden til `FirstDawnDigital/Plagg`, se
-"Udestående" -- git push er en synlig, offentlig handling jeg ikke
-foretager uden Esbens direkte ok).
+**G5 er nu funktionelt komplet, teknisk gennemgået OG LIVE (2026-07-10):**
+kode pushet til `FirstDawnDigital/Plagg` (Esben gav eksplicit ok), repo
+gjort offentligt (org-planen understøtter ikke Pages fra private repos --
+ingen hemmeligheder i koden), GitHub Pages aktiveret (servér fra
+`main`/`docs`, ingen Actions-workflow nødvendig da frontend er ren
+statisk HTML uden build-step). Bekræftet live med Playwright:
+**https://firstdawndigital.github.io/Plagg/**, login "klematis" virker,
+viser korrekt data fra Fase 4-testkørslerne. Eneste resterende skridt:
+Esbens beslutning om at flippe `output.targets`/`trigger.source`/
+`wishlist.source` til `"turso"` i `config.yaml`, saa fremtidige kørsler
+rent faktisk opdaterer webappen (indtil da viser den i morges' testdata,
+uændret, harmløst).
 
 ### G1-fund (2026-07-09): login løser bundling-problemet
 
