@@ -61,6 +61,14 @@ from urllib.parse import quote
 
 logger = logging.getLogger("personal_shopper.sellpy")
 
+# G16: signalerer eksplicit til monitor.py's run_source() at fetch_details()
+# er en AEGTE no-op for denne kilde -- kandidater kan trygt springe HELE
+# detalje-fasen over (ingen ekstra HTTP-kald noedvendig). Modsat Vinted, hvor
+# fetch_details() nu goer reelt arbejde (land-opslag), saa den IKKE kan
+# springes over paa samme maade. Manglende attribut paa et kildemodul
+# tolkes som False (skal IKKE springes over) -- se monitor.py:run_source().
+SKIP_DETAIL_FETCH = True
+
 ALGOLIA_URL = "https://3lxsu2dn7t-dsn.algolia.net/1/indexes/*/queries"
 ALGOLIA_APP_ID = "3LXSU2DN7T"
 # Offentlig, klient-side dansk SOEGE-key (search-only, samme som Sellpy.dk's egen
@@ -211,11 +219,15 @@ def fetch(config: dict, dry_run: bool = False) -> list[dict]:
     return raw_listings
 
 
-def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[str, dict]:
+def fetch_details(
+    urls: list[str], config: dict, dry_run: bool = False,
+    raw_listings_by_url: dict | None = None,
+) -> dict[str, dict]:
     """No-op: ALT (maerke/stand/saelger/fragt) hentes allerede i fetch()'s Algolia-
     hit, saa der er ingen separat detaljeside at besoege. Returnerer et tomt dict
     -- run_source() i monitor.py haandterer 'ingen detalje for denne url' via
     setdefault, og da fetch() allerede har sat alle felterne paa hver listing,
     aendrer den fallback intet. Beholdes for at opfylde den faelles to-fase-
-    kontrakt (fetch/fetch_details) som Reshopper/DBA."""
+    kontrakt (fetch/fetch_details) som Reshopper/DBA.
+    'raw_listings_by_url' (G16-tilfoejet, uafhaengig af Sellpy) er ubrugt her."""
     return {}

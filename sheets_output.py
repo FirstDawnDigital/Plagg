@@ -54,9 +54,11 @@ def _is_bad_stand(stand: str) -> bool:
 # vises side om side er det ikke laengere aabenlyst hvilken platform et
 # opslag stammer fra, og det er ALDRIG sikkert at en saelger med samme navn
 # paa to platforme er samme person (se bundling.py:_seller_key).
+# G16: "Land"-kolonnen er kun udfyldt for Vinted-fund (se
+# sources/vinted.py's fetch_details()) -- tom for de andre kilder.
 MATCHES_HEADER = [
     "Link", "Opslag-ID", "Kilde", "Match", "Pris (kr.)", "Størrelse", "Mærke",
-    "Stand", "Sælger", "Ønske (type/mærke/størrelse)", "Fragt (kr.)",
+    "Stand", "Sælger", "Land", "Ønske (type/mærke/størrelse)", "Fragt (kr.)",
     "Først set", "Opdateret",
 ]
 
@@ -393,12 +395,16 @@ def write_matches(spreadsheet, matches: list[dict], first_seen_lookup: dict, now
         # header (fx den nye "Opslag-ID") -- udvid i stedet for at fejle paa update().
         ws.resize(cols=len(MATCHES_HEADER) + 2)
     data = [MATCHES_HEADER]
-    bad_stand_rows = []  # H3: raekke-numre der skal have advarsels-baggrund
+    bad_stand_rows = []  # H3/G16: raekke-numre der skal have advarsels-baggrund
     for idx, m in enumerate(matches):
         wl_ref = f"{m.get('wishlist_type', '')}/{m.get('wishlist_maerke', '') or 'generisk'}/{m.get('wishlist_stoerrelse', '')}"
         first_seen = first_seen_lookup.get(m.get("_db_id"), now_str)
         stand_raw = m.get("stand", "ukendt")
-        if _is_bad_stand(stand_raw):
+        seller_country = m.get("seller_country") or ""
+        # G16: samme advarsels-baggrund som defekt stand -- polske saelgere
+        # er ikke udelukket (soft nedprioriteret, se matching.py), men
+        # fortjener samme visuelle "se naermere efter"-advarsel.
+        if _is_bad_stand(stand_raw) or seller_country in matching.DEPRIORITIZED_SELLER_COUNTRIES:
             bad_stand_rows.append(idx + 2)  # +2: header er raekke 1, data starter raekke 2
         data.append([
             make_hyperlink(m.get("url", "")),
@@ -410,6 +416,7 @@ def write_matches(spreadsheet, matches: list[dict], first_seen_lookup: dict, now
             m.get("brand", "") or "",
             _display_stand(stand_raw),
             m.get("seller_name", "ukendt"),
+            seller_country,
             wl_ref,
             _format_kr(m.get("shipping_price")),
             first_seen[:16] if first_seen else "",

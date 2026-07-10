@@ -36,6 +36,16 @@ TYPE_SYNONYMS = {
 
 GENERIC_BRAND_MARKERS = {"", "ukendt", "unknown", "blandet", "diverse", "no brand"}
 
+# G16: Esben har observeret at polske Vinted-saelgere ofte har dyr fragt OG
+# hyppig parfumelugt paa toejet -- IKKE en hard eksklusion (varen kan sagtens
+# vaere et godt fund alligevel), kun en SOFT nedprioritering i sorteringen +
+# en synlig advarsel, saa Esbens kone selv kan vurdere. 'seller_country'
+# kommer fra sources/vinted.py's fetch_details() (se dens G16-fund) -- tomt/
+# ukendt land (andre kilder, eller et fejlet Vinted-land-opslag) paavirker
+# ALDRIG sorteringen.
+DEPRIORITIZED_SELLER_COUNTRIES = {"PL"}
+COUNTRY_WARNING_TEXT = "⚠️ Polsk sælger – ofte dyr fragt + parfumelugt"
+
 # G6: 5-trins normaliseret stand-skala paa tvaers af Reshopper/DBA/Sellpy/
 # Vinted -- hver platform bruger sin egen fritekst-formulering (Reshopper
 # "Helt ny"/"Næsten som ny"/"God, men brugt"/"Defekt, kan laves"; Sellpy
@@ -204,6 +214,13 @@ def match_item(wishlist_item: dict, listing: dict) -> dict | None:
     # konsistent tier paa tvaers af kilder) -- persisteres IKKE i DB/Turso-
     # skemaet, beregnes on-the-fly hver koersel fra den raa 'stand'.
     enriched["stand_norm"] = normalize_stand(listing.get("stand") or "")
+    # G16: synlig advarsel for nedprioriterede saelger-lande (se
+    # DEPRIORITIZED_SELLER_COUNTRIES) -- tom streng (ikke None) naar der ikke
+    # er noget at advare om, saa UI/Sheets kan bruge feltet direkte uden et
+    # separat None-tjek.
+    enriched["country_warning"] = (
+        COUNTRY_WARNING_TEXT if listing.get("seller_country") in DEPRIORITIZED_SELLER_COUNTRIES else ""
+    )
     return enriched
 
 
@@ -219,8 +236,15 @@ def match_all(wishlist: list[dict], listings: list[dict]) -> list[dict]:
             if m:
                 matches.append(m)
 
+    # G16: nedprioriterede saelger-lande (fx polske Vinted-saelgere) sorteres
+    # LAENGERE NEDE inden for samme match_rank-tier -- de forbliver synlige
+    # (soft, ikke en hard eksklusion), blot ikke foerst i listen.
     rank_order = {"eksakt": 0, "naer match": 1}
-    matches.sort(key=lambda m: (rank_order.get(m["match_rank"], 2), m.get("price", 0)))
+    matches.sort(key=lambda m: (
+        rank_order.get(m["match_rank"], 2),
+        1 if m.get("seller_country") in DEPRIORITIZED_SELLER_COUNTRIES else 0,
+        m.get("price", 0),
+    ))
     logger.info(
         "Matching: %d match(es) fundet paa tvaers af %d oenskeseddel-item(s) og %d annonce(r)",
         len(matches), len(wishlist), len(listings),

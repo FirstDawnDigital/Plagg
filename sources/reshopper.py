@@ -330,12 +330,17 @@ def _find_stand_label(page) -> str | None:
         return None
 
 
-def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[str, dict]:
+def fetch_details(
+    urls: list[str], config: dict, dry_run: bool = False,
+    raw_listings_by_url: dict | None = None,
+) -> dict[str, dict]:
     """Besoeger hver annonce-URL for stand/saelger/fragt -- kaldes af monitor.py
     KUN for allerede kort-niveau-filtrerede kandidater (se fetch()-docstring).
     Returnerer {url: {brand, stand, seller_name, seller_id, shipping_price,
     shipping_currency, condition_raw}}. En enkelt annonces fejl paavirker aldrig
-    de andre -- manglende detaljer giver blot "ukendt"-felter for den annonce."""
+    de andre -- manglende detaljer giver blot "ukendt"-felter for den annonce.
+    'raw_listings_by_url' (G16-tilfoejet for Vinted) er ubrugt her -- Reshopper
+    henter alt fra selve detaljesiden, ikke fra det raa soegekort."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:

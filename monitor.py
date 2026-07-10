@@ -169,19 +169,25 @@ def run_source(
 
         # G10 (hastighedsoptimering): opdel kandidaterne i tre grupper FOER vi
         # kalder det dyre fetch_details():
-        #   1. Kilder hvor fetch_details() er en BEVIDST no-op (Sellpy/Vinted,
-        #      se de moduler) -- raa-kortet indeholder allerede ALLE detaljer
-        #      (strukturelt signal: 'seller_name' findes allerede i kortets
-        #      egen dict, modsat Reshopper/DBA hvor den KUN tilfoejes via
-        #      fetch_details()). Disse skal aldrig i detalje-opslags-listen.
+        #   1. Kilder hvor fetch_details() er en BEVIDST no-op (kun Sellpy
+        #      efter G16 -- se dens 'SKIP_DETAIL_FETCH = True'; Vinted er
+        #      IKKE laengere i denne gruppe, den goer nu reelt arbejde her,
+        #      se sources/vinted.py's G16-fund) -- raa-kortet indeholder
+        #      allerede ALLE detaljer. Disse skal aldrig i detalje-opslags-
+        #      listen. Manglende SKIP_DETAIL_FETCH-attribut (Reshopper/DBA)
+        #      tolkes som False (skal IKKE springes over).
         #   2. Kandidater vi allerede har detalje-hentet succesfuldt i en
         #      TIDLIGERE koersel (samme id = hash(kilde+url), se
         #      db.cached_details_map()) -- genbruges direkte, INGEN
         #      netvaerkskald. Sparer 5-15s Playwright-throttling PR. kandidat
-        #      for Reshopper/DBA.
+        #      for Reshopper/DBA, og ét land-opslagskald pr. saelger for Vinted.
         #   3. Resten -- helt nye kandidater, som stadig skal have det fulde
         #      fetch_details()-opslag.
-        already_complete_urls = {url for url in candidate_urls if "seller_name" in by_url[url]}
+        skip_detail_fetch = getattr(source_module, "SKIP_DETAIL_FETCH", False)
+        already_complete_urls = (
+            {url for url in candidate_urls if "seller_name" in by_url[url]}
+            if skip_detail_fetch else set()
+        )
         cache_hits: dict[str, dict] = {}
         new_detail_urls = []
         for url in candidate_urls:
@@ -201,8 +207,13 @@ def run_source(
         )
 
         # Fase 2: detalje-opslag KUN for de nye, ufordoejede kandidater.
+        # 'raw_listings_by_url' (G16) lader Vinted slaa saelger-ID op pr. URL
+        # for at kunne foretage land-opslaget -- ubrugt af Reshopper/DBA/Sellpy.
         details_by_url = (
-            source_module.fetch_details(new_detail_urls, search_config, dry_run=dry_run)
+            source_module.fetch_details(
+                new_detail_urls, search_config, dry_run=dry_run,
+                raw_listings_by_url=by_url,
+            )
             if new_detail_urls else {}
         )
 
@@ -509,6 +520,7 @@ def main() -> int:
                         "seller_name": c.get("seller_name"),
                         "seller_id": c.get("seller_id"),
                         "shipping_price": c.get("shipping_price"),
+                        "seller_country": c.get("seller_country"),
                         "url": c.get("url"),
                         "match_rank": None,
                         "wishlist_type": None,
@@ -536,6 +548,7 @@ def main() -> int:
                         "seller_name": m.get("seller_name"),
                         "seller_id": m.get("seller_id"),
                         "shipping_price": m.get("shipping_price"),
+                        "seller_country": m.get("seller_country"),
                         "url": m.get("url"),
                         "match_rank": m.get("match_rank"),
                         "wishlist_type": m.get("wishlist_type"),

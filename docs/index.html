@@ -525,6 +525,9 @@
     el.innerHTML = matches.map(m => {
       const standText = m.stand || "";
       const isBad = standText.toLowerCase().includes("defekt");
+      // G16: polske saelgere er soft nedprioriteret (se matching.py), ikke
+      // udelukket -- samme visuelle advarsel som en daarlig stand.
+      const isPolish = (m.seller_country || "") === "PL";
       return `
         <div class="match-card">
           <div class="card-top-row">
@@ -539,9 +542,10 @@
             ${m.size ? `<span>Str. <b>${escapeHtml(m.size)}</b></span>` : ""}
             ${m.brand ? `<span>${escapeHtml(m.brand)}</span>` : ""}
             ${standText ? `<span class="${isBad ? 'stand-warn' : ''}">${isBad ? '⚠ ' : ''}${escapeHtml(standText)}</span>` : ""}
-            ${m.seller_name ? `<span>Sælger: ${escapeHtml(m.seller_name)}</span>` : ""}
+            ${m.seller_name ? `<span>Sælger: ${escapeHtml(m.seller_name)}${m.seller_country ? ' (' + escapeHtml(m.seller_country) + ')' : ''}</span>` : ""}
             ${shortItemRef(m.item_id) ? `<span class="item-ref">${escapeHtml(shortItemRef(m.item_id))}</span>` : ""}
           </div>
+          ${isPolish ? `<div class="stand-warn">⚠️ Polsk sælger – ofte dyr fragt + parfumelugt</div>` : ""}
         </div>
       `;
     }).join("");

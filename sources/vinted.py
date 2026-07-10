@@ -97,13 +97,20 @@ G9-spike (BACKLOG.md, 2026-07-10) RE-VERIFICERET med rigtige kald 2026-07-10
       404 UDEN en gyldig login-session -- ikke et parse-problem, item
       findes tydeligvis (samme ID virker fint i catalog-soegningen), saa
       det er en bevidst adgangsbegraensning, ikke en midlertidig fejl.
-  Konklusion: fetch_details() herunder er derfor en BEVIDST no-op (se
-  dens docstring) -- et ekstra HTTP-kald pr. kandidat ville IKKE give os
-  fragtdata (det kraever login, uden for denne opgaves scope), kun oege
-  antallet af kald til en DataDome-beskyttet side UDEN gevinst. shipping_
-  price saettes derfor til None for alle Vinted-fund, ligesom Sellpys
-  faelles/no-data-tilfaelde, men af en anden grund (manglende adgang, ikke
-  en faelles/konstant fragtpris).
+  Konklusion: fragt kan IKKE hentes uden login (uden for denne opgaves
+  scope) -- shipping_price saettes derfor til None for alle Vinted-fund,
+  ligesom Sellpys faelles/no-data-tilfaelde, men af en anden grund
+  (manglende adgang, ikke en faelles/konstant fragtpris).
+
+  G16 (2026-07-10): fetch_details() er IKKE laengere en no-op. Live-
+  bekraeftet: 'GET /api/v2/users/<saelger-id>' svarer 200 MED JSON ANONYMT
+  (modsat /api/v2/items/<id> ovenfor, som kraever login) og indeholder
+  'country_code' direkte (fx "DK"/"PL"/"SE", verificeret paa 12 rigtige
+  saelgere paa tvaers af 5 soegetermer 2026-07-10) -- INTET behov for at
+  scrape profilside-HTML (den oprindeligt planlagte, mere skroebele
+  tilgang). fetch_details() slaar nu hver kandidats saelgers land op (ét
+  kald pr. UNIK saelger, se dens docstring) og tilfoejer 'seller_country' --
+  brand/stand/seller_name/shipping_price forbliver uaendret fra fetch().
 
 Vinted-saelgere er RIGTIGE individuelle personer (modsat Sellpys
 konsignationsmodel) -- Vinted er derfor IKKE i bundling.NON_BUNDLEABLE_
@@ -395,15 +402,110 @@ def fetch(config: dict, dry_run: bool = False) -> list[dict]:
     return raw_listings
 
 
-def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[str, dict]:
-    """Bevidst no-op: ALT (maerke/stand/saelger) hentes allerede i fetch()'s
-    catalog-hit, og fragt kan IKKE hentes anonymt overhovedet (hverken paa
-    hit- eller detaljeside-niveau, se modulets docstring under "FRAGT
-    UNDERSOEGT, IKKE TILGAENGELIG ANONYMT") -- et ekstra HTTP-kald pr.
-    kandidat ville derfor blot oege belastningen paa en DataDome-beskyttet
-    side uden at give ny data. Returnerer et tomt dict -- run_source() i
-    monitor.py haandterer 'ingen detalje for denne url' via setdefault, og
-    da fetch() allerede har sat alle felterne paa hver listing, aendrer den
-    fallback intet (samme moenster som sources/sellpy.py). Beholdes for at
-    opfylde den faelles to-fase-kontrakt (fetch/fetch_details)."""
-    return {}
+USER_API_URL_TMPL = "https://www.vinted.dk/api/v2/users/{user_id}"
+
+
+def _fetch_seller_country(session, seller_id: str, timeout: int) -> tuple[str | None, bool]:
+    """G16-fund (2026-07-10, live bekraeftet): Vinteds bruger-API
+    ('GET /api/v2/users/<id>') svarer 200 MED JSON ANONYMT (modsat
+    '/api/v2/items/<id>' som 404'er uden login, se modulets docstring om
+    fragt) og indeholder 'country_code' (fx 'DK'/'PL'/'SE') direkte -- INTET
+    behov for at scrape profilside-HTML, langt mere robust. Returnerer
+    (landekode-eller-None, hit_bot_wall). hit_bot_wall=True signalerer til
+    kaldstedet at stoppe RESTEN af land-opslagene for denne koersel (samme
+    kredsloebsafbryder-princip som fetch()'s bot-wall-haandtering)."""
+    try:
+        resp = session.get(
+            USER_API_URL_TMPL.format(user_id=seller_id), timeout=timeout,
+            headers={"Accept": "application/json"},
+        )
+    except Exception:
+        logger.exception("Vinted: netvaerksfejl ved land-opslag for saelger %s", seller_id)
+        return None, False
+    if _looks_like_bot_wall(resp):
+        logger.warning(
+            "Vinted: bot-wall/challenge moedt ved land-opslag for saelger %s", seller_id,
+        )
+        return None, True
+    if resp.status_code != 200:
+        logger.warning(
+            "Vinted: uventet status %s ved land-opslag for saelger %s",
+            resp.status_code, seller_id,
+        )
+        return None, False
+    try:
+        return (resp.json().get("user") or {}).get("country_code") or None, False
+    except Exception:
+        logger.exception("Vinted: kunne ikke parse land-opslags-svar for saelger %s", seller_id)
+        return None, False
+
+
+def fetch_details(
+    urls: list[str], config: dict, dry_run: bool = False,
+    raw_listings_by_url: dict | None = None,
+) -> dict[str, dict]:
+    """G16: IKKE laengere en no-op. brand/stand/seller_name/shipping_price
+    kommer FORTSAT fra fetch()'s catalog-hit (uaendret, se modulets
+    docstring) -- denne funktion tilfoejer KUN 'seller_country' (Esbens
+    oenske om at se/nedprioritere efter land, se BACKLOG.md's G16).
+
+    ÉT opslag PR. UNIK SAELGER, ikke pr. annonce -- flere annoncer fra samme
+    saelger (almindeligt) genbruger opslaget inden for samme koersel, saa vi
+    ikke spilder kald paa allerede kendt data. Kraever 'raw_listings_by_url'
+    (leveret af monitor.py's run_source(), se dens G16-kommentar) for at
+    kunne slaa saelger-ID op pr. URL -- uden den (fx et kald udefra uden
+    denne kwarg) returneres blot et tomt dict, ingen undtagelse.
+
+    Stopper RESTEN af land-opslagene for koerslen ved foerste bot-wall
+    (samme kredsloebsafbryder-princip som fetch()) -- allerede opslaaede
+    saelgere i denne koersel beholder deres fund, resten faar blot ingen
+    'seller_country' (matching/visning behandler manglende land som
+    ukendt, ikke som en fejl)."""
+    if not raw_listings_by_url:
+        logger.warning(
+            "Vinted: fetch_details() kaldt uden raw_listings_by_url, "
+            "kan ikke slaa saelger-land op -- springer over"
+        )
+        return {}
+
+    try:
+        import requests  # noqa: F401 -- fejl tidligt+tydeligt hvis dep mangler
+    except ImportError:
+        logger.warning("Vinted: 'requests' er ikke installeret, springer land-opslag over")
+        return {}
+
+    vt_cfg = config.get("vinted", {})
+    timeout = vt_cfg.get("timeout_s", 20)
+    min_delay = vt_cfg.get("min_delay_s", 5)
+    max_delay = vt_cfg.get("max_delay_s", 15)
+
+    session = _prime_session(timeout)
+    if session is None:
+        return {}  # allerede logget i _prime_session
+
+    country_by_seller: dict[str, str | None] = {}
+    details: dict[str, dict] = {}
+    for url in urls:
+        listing = raw_listings_by_url.get(url) or {}
+        seller_id = listing.get("seller_id")
+        if not seller_id:
+            continue  # intet saelger-id at slaa land op paa
+
+        if seller_id not in country_by_seller:
+            logger.info("Vinted: slaar land op -> saelger %s", seller_id)
+            country, hit_bot_wall = _fetch_seller_country(session, seller_id, timeout)
+            if hit_bot_wall:
+                logger.warning(
+                    "Vinted: land-opslag stoppet for RESTEN af denne koersel (bot-wall)"
+                )
+                break
+            country_by_seller[seller_id] = country
+            time.sleep(random.uniform(min_delay, max_delay))
+
+        details[url] = {"seller_country": country_by_seller[seller_id]}
+
+    logger.info(
+        "Vinted: land-opslag faerdig -- %d unik(ke) saelger(e) slaaet op, %d annonce(r) beriget",
+        len(country_by_seller), len(details),
+    )
+    return details

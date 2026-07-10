@@ -43,6 +43,11 @@ ADDITIONAL_COLUMNS = {
     "seller_name": "TEXT",
     "seller_id": "TEXT",
     "shipping_price": "REAL",
+    # G16: saelgers land (fx "DK"/"PL"/"SE"), kun udfyldt for Vinted (se
+    # sources/vinted.py's fetch_details()) -- NULL for de andre kilder/for
+    # Vinted-fund hvor land-opslaget fejlede. Bruges til Esbens oenske om at
+    # nedprioritere polske saelgere (dyr fragt + hyppig parfumelugt).
+    "seller_country": "TEXT",
     "url": "TEXT",
     "match_rank": "TEXT",
     "wishlist_type": "TEXT",
@@ -89,23 +94,25 @@ def first_seen_map(conn: sqlite3.Connection) -> dict:
 
 
 def cached_details_map(conn: sqlite3.Connection) -> dict:
-    """id -> {brand, size, stand, seller_name, seller_id, shipping_price} for
-    ALLE raekker der har RIGTIGE detalje-data fra et tidligere lykkedes
-    detalje-opslag (details_fetched = 1, se ADDITIONAL_COLUMNS' kommentar).
+    """id -> {brand, size, stand, seller_name, seller_id, shipping_price,
+    seller_country} for ALLE raekker der har RIGTIGE detalje-data fra et
+    tidligere lykkedes detalje-opslag (details_fetched = 1, se
+    ADDITIONAL_COLUMNS' kommentar).
 
     Bruges af monitor.py's run_source() til at springe det dyre (5-15s
-    Playwright-throttlet) fetch_details()-kald HELT over for kandidat-URL'er
-    vi allerede kender -- kun helt nye annonce-id'er faar det fulde opslag.
-    Laeses ÉN gang i hovedtraaden FOER kilderne koeres parallelt (se main()),
-    og gives derefter som et read-only dict til hver kildes worker-traad
-    (samtidig laesning af samme dict fra flere traade er sikkert i Python).
+    Playwright-throttlet, eller for Vinted: ét land-opslagskald pr. saelger)
+    fetch_details()-kald HELT over for kandidat-URL'er vi allerede kender --
+    kun helt nye annonce-id'er faar det fulde opslag. Laeses ÉN gang i
+    hovedtraaden FOER kilderne koeres parallelt (se main()), og gives
+    derefter som et read-only dict til hver kildes worker-traad (samtidig
+    laesning af samme dict fra flere traade er sikkert i Python).
 
-    VIGTIGT: prisen tages ALDRIG herfra -- kun brand/size/stand/seller/fragt.
-    Prisen skal altid komme fra den friske soegeresultat-side, da den (modsat
-    de oevrige felter) reelt kan aendre sig fra koersel til koersel."""
+    VIGTIGT: prisen tages ALDRIG herfra -- kun brand/size/stand/seller/fragt/
+    land. Prisen skal altid komme fra den friske soegeresultat-side, da den
+    (modsat de oevrige felter) reelt kan aendre sig fra koersel til koersel."""
     rows = conn.execute(
-        "SELECT id, brand, size, stand, seller_name, seller_id, shipping_price "
-        "FROM listings WHERE details_fetched = 1"
+        "SELECT id, brand, size, stand, seller_name, seller_id, shipping_price, "
+        "seller_country FROM listings WHERE details_fetched = 1"
     )
     return {
         row[0]: {
@@ -115,6 +122,7 @@ def cached_details_map(conn: sqlite3.Connection) -> dict:
             "seller_name": row[4],
             "seller_id": row[5],
             "shipping_price": row[6],
+            "seller_country": row[7],
         }
         for row in rows
     }
@@ -134,18 +142,20 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict, dry_run: bool = Fals
     et reelt match altid 'vinder' inden for samme koersel."""
     if dry_run:
         return
+    listing = dict(listing)
+    listing.setdefault("seller_country", None)
     conn.execute(
         """
         INSERT INTO listings
             (id, source, item_id, title, brand, size, price, stand, seller_name,
              seller_id, shipping_price, url, match_rank, wishlist_type,
              wishlist_maerke, wishlist_stoerrelse, first_seen, last_seen,
-             details_fetched)
+             details_fetched, seller_country)
         VALUES
             (:id, :source, :item_id, :title, :brand, :size, :price, :stand, :seller_name,
              :seller_id, :shipping_price, :url, :match_rank, :wishlist_type,
              :wishlist_maerke, :wishlist_stoerrelse, :first_seen, :last_seen,
-             :details_fetched)
+             :details_fetched, :seller_country)
         ON CONFLICT(id) DO UPDATE SET
             price = excluded.price,
             stand = excluded.stand,
@@ -158,6 +168,15 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict, dry_run: bool = Fals
             details_fetched = CASE
                 WHEN excluded.details_fetched = 1 THEN 1
                 ELSE listings.details_fetched
+            END,
+            -- G16: modsat brand/seller_name/seller_id (stabile identitets-
+            -- felter, se modulets docstring) OPDATERES seller_country ved
+            -- hver koersel der reelt fandt et land -- undgaar at et FOERSTE
+            -- mislykkedes land-opslag (NULL) laaser raekken fast for altid,
+            -- selvom en senere koersel finder det rigtige land.
+            seller_country = CASE
+                WHEN excluded.seller_country IS NOT NULL THEN excluded.seller_country
+                ELSE listings.seller_country
             END
         """,
         listing,

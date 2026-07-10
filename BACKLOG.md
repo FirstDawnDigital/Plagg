@@ -8,14 +8,14 @@
 **Live demo/dashboard (aktivt i brug):** https://docs.google.com/spreadsheets/d/1EjCrvQmHcTz6MAhSYhQYPCfbB9rTKyscMJJ5ZtNPjO4
 (faner "Matches" og "Bundles", opdateret 2026-07-09 — H1-H5 leveret, se nedenfor)
 
-**G5-webapp (live, men IKKE endnu koblet til friske kørsler):** https://firstdawndigital.github.io/Plagg/
+**G5-webapp (live OG koblet til friske kørsler):** https://firstdawndigital.github.io/Plagg/
 (adgangskode "klematis"). Kode pushet til `FirstDawnDigital/Plagg` (repo
 gjort offentligt 2026-07-10, da org-planen ikke understøtter Pages fra
 private repos -- ingen hemmeligheder i koden, data ligger i Turso, ikke
-i repoet). Viser i dag data fra Fase 4-testkørslerne (12 matches, 5
-bundles) -- opdateres først med FRISK data når Esben aktivt sætter
-`output.targets`/`trigger.source`/`wishlist.source` til `"turso"` i
-`config.yaml` (se G5-status).
+i repoet). `wishlist.source: "turso"` + en dedikeret
+`trigger_watcher.py --source turso`-proces koerer parallelt med
+Sheets-sporet -- "Kør nu" i webappen trigger reelle koersler (bekraeftet
+live 2026-07-10/11, flere koersler om dagen, 14-25 matches typisk).
 
 ## Aktiv backlog (næste øverst)
 
@@ -25,8 +25,8 @@ ID    Emne                              Prioritet     Status
 G14   Vinted-fix: priming-retry+badges  Size 3        DONE
 G15   Størrelse: eksakt/op, aldrig ned  Size 2        DONE
 G6    Stand-normalisering (m. punkt 3)  Size 4-5      DONE
-G16   Vinted land + polsk-nedprioritet  Size 6-7      NÆSTE (afh. profilside)
-G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
+G16   Vinted land + polsk-nedprioritet  Size 6-7      DONE
+G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
 ```
@@ -99,23 +99,47 @@ persisteret i DB/Turso). **Verificeret:** 22 `normalize_stand()`-cases +
 tværs af alle 4 kilder (defekt+under-tærskel-fund korrekt udelukket,
 ny+næsten_ny-fund korrekt bevaret) -- alle bestod. Size 4-5.
 
-**G16 — Vinted land + polsk-nedprioritering (punkt 4+5 slået sammen).**
-BEKRÆFTET LIVE: Vinteds anonyme catalog-hit indeholder INTET land
-(`user`-objektet har kun business/id/login/photo/profile_url; ingen
-city/country nogen steder; `/api/v2/items/<id>` 404'er uden login).
-**Esben har besluttet (2026-07-10) at bygge det alligevel** via opslag
-af hver sælgers `profile_url`-HTML (1 ekstra kald pr. Vinted-kandidat mod
-en DataDome-beskyttet side). Punkt 5 (nedprioritér polske sælgere:
-dyr fragt + hyppig parfumelugt) er HÅRDT afhængig af dette og bygges
-sammen med det. **Teknisk:** (a) `sources/vinted.py` henter sælgers
-profil-HTML og udtrækker land (skånsom kadence, bot-wall-håndtering som
-resten); (b) ny DB-kolonne `seller_country` + Turso-skemafelt + visning
-(land-flag/tekst pr. Vinted-match i webapp/Sheets); (c) soft
-nedrangering i `matching.match_all()`-sort for polske sælgere + synlig
-advarsel (parfumelugt/dyr fragt), IKKE hård eksklusion. Size 6-7.
-**Reel risiko (ærligt flag fra spike):** usikkert om profilside-opslaget
-holder stabilt i drift uden at blive DataDome-blokeret -- byg med tidlig
-validering af at det faktisk virker før resten bygges ovenpå.
+**G16 (DONE, 2026-07-11 — punkt 4+5 slået sammen) — Vinted land +
+polsk-nedprioritering.** Planen var at scrape sælgers `profile_url`-HTML
+(bot-wall-risiko, DataDome). **Bedre fund under tidlig validering (jf.
+spikens advarsel om at validere FØR resten bygges ovenpå):** Vinteds
+bruger-API (`GET /api/v2/users/<sælger-id>`) svarer 200 MED JSON HELT
+ANONYMT (modsat `/api/v2/items/<id>` der kræver login) og indeholder
+`country_code` direkte -- INTET behov for HTML-scraping. Live-verificeret
+på 12+ sælgere på tværs af 5 søgetermer (DK/PL/SE observeret).
+**Arkitektur-udfordring løst:** `fetch_details()` fik tidligere kun URL'er,
+ikke sælger-ID -- den delte to-fase-kontrakt udvidet med et nyt valgfrit
+`raw_listings_by_url`-kwarg (accepteret+ignoreret af Reshopper/DBA/Sellpy,
+brugt af Vinted). Vinteds candidates blev tidligere markeret "allerede
+komplette" (samme genvej som Sellpy) og sprang derfor HELE
+detalje-fasen over -- adskilt via nyt eksplicit `SKIP_DETAIL_FETCH`-modul-
+flag (`True` for Sellpy, default `False` ellers) i stedet for det gamle
+skøre duck-typing-tjek ("har kortet en 'seller_name'-nøgle"). ÉT
+land-opslag PR. UNIK SÆLGER pr. koersel (ikke pr. annonce) -- flere
+annoncer fra samme sælger genbruger opslaget. **Leveret:** ny
+`seller_country`-kolonne i `db.py` (cachet ligesom brand/stand, men
+OPDATERES på conflict hvis et senere opslag lykkes hvor et tidligere
+fejlede -- modsat brand/seller_name); samme kolonne tilføjet til Tursos
+LIVE `matches`-tabel via idempotent `PRAGMA table_info`+`ALTER TABLE`
+(CREATE TABLE IF NOT EXISTS rører ikke en allerede-eksisterende
+produktionstabel); `matching.py`s `DEPRIORITIZED_SELLER_COUNTRIES = {"PL"}`
+sorterer polske sælgere sidst inden for samme match-tier (soft, IKKE
+ekskluderet) + synlig `country_warning`-tekst; webapp viser land ved
+sælgernavn + samme advarsel; Sheets fik en "Land"-kolonne + samme
+advarsels-baggrund som defekt stand. **Verificeret:** fuld
+`monitor.run_source()`-kørsel for Vinted (0 "allerede komplette", alle
+5 kandidater korrekt gennem det nye land-opslag); Sellpy uændret
+(stadig "8 allerede komplette, 0 nye opslag"); syntetisk sorteringstest
+(polsk sælger korrekt sidst TROSS laveste pris); DB- og Turso-roundtrip
+mod den ægte lokale/produktions-database. **Uheld undervejs (selv-rettet):**
+et testskriv ramte ved en fejl LIVE Turso-produktionsdata (overskrev
+current_run_id med 1 falsk testmatch) -- opdaget straks, rettet ved at
+trigge en rigtig `monitor.py`-kørsel via den kørende
+`trigger_watcher.py --source turso`-proces, som gendannede korrekte
+data (bekræftet: testrækken væk, 15 rigtige matches tilbage). 52
+Vinted-rækker fra FØR G16 nulstillet (`details_fetched=0`) for
+naturlig land-backfill ved genopdagelse -- ingen tvungen fuld-backfill
+(scope-afgrænset, selvhelende over tid). Size 6-7.
 
 **Prioriterings-begrundelse:** G14+G15 er små, høj-værdi fixes med nul
 afhængigheder (gøres først). G6 (stand) er den tunge, veldefinerede

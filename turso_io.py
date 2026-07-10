@@ -42,7 +42,7 @@ SCHEMA_STATEMENTS = [
         source TEXT NOT NULL, title TEXT, match_rank TEXT, price REAL,
         size TEXT, brand TEXT, stand TEXT, seller_name TEXT, seller_id TEXT,
         wishlist_type TEXT, wishlist_maerke TEXT, wishlist_stoerrelse TEXT,
-        shipping_price REAL, first_seen TEXT,
+        shipping_price REAL, first_seen TEXT, seller_country TEXT,
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )""",
     "CREATE INDEX IF NOT EXISTS idx_matches_run_id ON matches(run_id)",
@@ -160,9 +160,26 @@ def _num(value, cast):
 
 def ensure_schema(turso_url: str, token: str) -> None:
     """CREATE TABLE IF NOT EXISTS x4 + INSERT OR IGNORE control-singleton.
-    Idempotent, tænkt kaldt hver monitor.py-koersel."""
+    Idempotent, tænkt kaldt hver monitor.py-koersel.
+
+    G16: 'seller_country' er en NY kolonne paa en tabel der allerede findes
+    i PRODUKTION (den live Turso-database) -- CREATE TABLE IF NOT EXISTS
+    roerer IKKE en eksisterende tabel, saa kolonnen tilfoejes separat via
+    PRAGMA table_info + ALTER TABLE (samme idempotente moenster som
+    db.py:ensure_schema() bruger for den lokale SQLite-db)."""
     _pipeline(turso_url, token, [{"sql": s, "args": []} for s in SCHEMA_STATEMENTS])
+    _ensure_matches_seller_country_column(turso_url, token)
     logger.info("Turso: skema bekraeftet/oprettet")
+
+
+def _ensure_matches_seller_country_column(turso_url: str, token: str) -> None:
+    result = _pipeline(turso_url, token, [{"sql": "PRAGMA table_info(matches)", "args": []}])
+    existing_columns = {row["name"] for row in _rows_as_dicts(result[0])}
+    if "seller_country" not in existing_columns:
+        _pipeline(turso_url, token, [
+            {"sql": "ALTER TABLE matches ADD COLUMN seller_country TEXT", "args": []},
+        ])
+        logger.info("Turso: 'seller_country'-kolonne tilfoejet til matches (G16)")
 
 
 def load_wishlist_from_turso(turso_url: str, token: str) -> list[dict]:
@@ -234,15 +251,16 @@ def write_matches_and_bundles(
             "sql": """INSERT INTO matches
                 (run_id, db_id, url, item_id, source, title, match_rank, price,
                  size, brand, stand, seller_name, seller_id, wishlist_type,
-                 wishlist_maerke, wishlist_stoerrelse, shipping_price, first_seen)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 wishlist_maerke, wishlist_stoerrelse, shipping_price, first_seen,
+                 seller_country)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             "args": [
                 run_id, db_id, m.get("url"), m.get("item_id"), m.get("source"),
                 m.get("title"), m.get("match_rank"), _num(m.get("price"), float),
                 m.get("size"), m.get("brand"), m.get("stand"), m.get("seller_name"),
                 m.get("seller_id"), m.get("wishlist_type"), m.get("wishlist_maerke"),
                 m.get("wishlist_stoerrelse"), _num(m.get("shipping_price"), float),
-                first_seen,
+                first_seen, m.get("seller_country"),
             ],
         })
     for i in range(0, len(match_stmts), BATCH_SIZE):
