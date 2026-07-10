@@ -75,6 +75,20 @@ sellpy:
   timeout_s: 20              # HTTP-timeout paa Algolia-kaldet (sekunder)
 
 # ─────────────────────────────────────────────
+# Vinted-adfaerd (G9: Vinted som ny kilde)
+# ─────────────────────────────────────────────
+vinted:
+  # Anonym cookie-priming (GET vinted.dk/) + ét catalog/items-kald pr. term --
+  # ingen browser/login (se sources/vinted.py's docstring og BACKLOG.md's
+  # G9-fund), men Vinted sidder bag DataDome (haardere bot-beskyttelse end
+  # Sellpys Algolia-endpoint), saa vi bruger samme skaansomme kadence-moenster
+  # som Reshopper/DBA i stedet for Sellpys enkelt-kald-uden-delay.
+  max_results_per_term: 20   # catalog/items per_page pr. soegeterm
+  timeout_s: 20              # HTTP-timeout pr. kald (sekunder)
+  min_delay_s: 5
+  max_delay_s: 15
+
+# ─────────────────────────────────────────────
 # Bundling / fragt-oekonomi
 # ─────────────────────────────────────────────
 bundling:

@@ -22,7 +22,6 @@ bundles) -- opdateres først med FRISK data når Esben aktivt sætter
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
-G9    Vinted som match-kilde            Size 4        TODO (spike klar)
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G6    Stand-baseret filtrering/nedton   WSJF ?        TODO
@@ -30,8 +29,26 @@ G3    Beskedudkast + reservation        WSJF 2.0      TODO
 ```
 
 Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
-G8 (Sellpy-kilde), J4-J7 (kritikrunde 2), + bundle-definition strammet +
-mobil-layout-fix.
+G8 (Sellpy-kilde), G9 (Vinted-kilde), J4-J7 (kritikrunde 2), +
+bundle-definition strammet + mobil-layout-fix.
+
+**G9 leveret (2026-07-10):** `sources/vinted.py` -- anonym cookie-priming
+(`GET vinted.dk/` sætter `anon_id`/`access_token_web`) + `GET
+api/v2/catalog/items?search_text=...`, ingen login. `fetch_details()` er
+no-op (fragt bekræftet reelt utilgængeligt anonymt, ikke kun et ekstra
+kald væk -- undersøgt via både item-siden ld+json og et 404'et
+`/api/v2/items/<id>`-forsøg). Prisfeltet er `price.amount` (EKSKL.
+Vinteds obligatoriske købergaranti-gebyr, for fair sammenligning på
+tværs af kilder). Børnetøjs-størrelse er format `"<alder> / <cm> cm"` --
+cm-tallet parses ud og matcher `matching.SIZE_LADDER` direkte. RIGTIGE
+individuelle sælgere (ikke konsignation som Sellpy) -- IKKE i
+`NON_BUNDLEABLE_SOURCES`, bundler normalt. Skånsom kadence (5-15s, som
+Reshopper/DBA) pga. DataDome/Cloudflare-beskyttelse -- bekræftet i
+praksis: en opfølgende test ramte en ægte Cloudflare-challenge (403,
+`Cf-Mitigated: challenge`), håndteret gracefully (logget, tom liste,
+ingen crash). Testet mod den rigtige 7-item-ønskeseddel: 140 rå hits →
+37 kandidater → 21 matches, 0 bundles (ingen sælger optrådte 2 gange i
+denne kørsel).
 
 **Kritikrunde 2026-07-10 (Opus, teknisk + UX) — fund der udløste J4-J7:**
 - **J4 (kritisk):** `wishlist.source=turso` gør Google Sheetets

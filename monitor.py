@@ -25,12 +25,13 @@ import matching
 import sheets_output
 import turso_io
 import wishlist as wishlist_module
-from sources import dba, reshopper, sellpy
+from sources import dba, reshopper, sellpy, vinted
 
 SOURCE_MODULES = {
     "reshopper": reshopper,
     "dba": dba,
     "sellpy": sellpy,
+    "vinted": vinted,
 }
 
 logger = logging.getLogger("personal_shopper")
