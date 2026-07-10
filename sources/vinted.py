@@ -128,6 +128,22 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
+# G14: et par alternative browser-UA'er til priming-retries. Et enkelt
+# transient 403 paa forsiden (observeret i praksis -- Esbens rapport om at
+# Vinted-resultater manglede helt i en koersel) skal ikke nulstille HELE
+# kildens resultat for koerslen; vi proever et par gange med stigende
+# ventetid FOER vi giver op, og roterer UA mellem forsoeg i tilfaelde af at
+# DataDome flagger den foerste UA specifikt.
+_PRIMING_USER_AGENTS = [
+    USER_AGENT,
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+]
+
+_PRIMING_MAX_ATTEMPTS = 3
+
 # Danske/engelske tekstmarkoerer som FALLBACK-signal for en DataDome-
 # challenge-side -- primaersignalet er 403/429-status ELLER at et JSON-kald
 # uventet faar et HTML-svar tilbage (se _looks_like_bot_wall). Vinted er en
@@ -195,36 +211,65 @@ def _looks_like_bot_wall(resp) -> bool:
         return False
 
 
-def _prime_session(timeout: int):
+def _prime_session(timeout: int, max_attempts: int = _PRIMING_MAX_ATTEMPTS):
     """Henter forsiden med en almindelig browser-UA for at saette en anonym
     cookie-jar (anon_id + access_token_web m.fl.) -- se modulets docstring.
-    Returnerer en requests.Session med cookies sat, eller None hvis
-    priming fejlede (netvaerksfejl eller uventet status/bot-wall)."""
+    Returnerer en requests.Session med cookies sat, eller None hvis ALLE
+    forsoeg fejlede (netvaerksfejl eller uventet status/bot-wall).
+
+    G14: proever op til `max_attempts` gange med stigende ventetid (2-5s,
+    4-10s, ...) og roterende UA (_PRIMING_USER_AGENTS) FOER kilden opgives --
+    et enkelt transient 403/429 paa forsiden skal ikke stille hele Vinted-
+    kilden i skammekrogen for en hel koersel."""
     import requests
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": USER_AGENT,
-        "Accept-Language": "da-DK,da;q=0.9,en;q=0.8",
-    })
-    try:
-        resp = session.get(BASE_URL, timeout=timeout)
-    except Exception:
-        logger.exception("Vinted: netvaerksfejl under cookie-priming, springer kilden over")
-        return None
-    if resp.status_code != 200:
-        logger.warning(
-            "Vinted: cookie-priming fik uventet status %s fra forsiden, springer kilden over",
-            resp.status_code,
-        )
-        return None
-    if not session.cookies.get("anon_id"):
-        logger.warning(
-            "Vinted: cookie-priming gav status 200 men ingen 'anon_id'-cookie -- "
-            "Vinted kan have aendret sit cookie-skema, springer kilden over"
-        )
-        return None
-    return session
+    for attempt in range(max_attempts):
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": _PRIMING_USER_AGENTS[attempt % len(_PRIMING_USER_AGENTS)],
+            "Accept-Language": "da-DK,da;q=0.9,en;q=0.8",
+        })
+        try:
+            resp = session.get(BASE_URL, timeout=timeout)
+        except Exception:
+            logger.exception(
+                "Vinted: netvaerksfejl under cookie-priming (forsoeg %d/%d)",
+                attempt + 1, max_attempts,
+            )
+            resp = None
+
+        if resp is not None and resp.status_code == 200 and session.cookies.get("anon_id"):
+            if attempt > 0:
+                logger.info(
+                    "Vinted: cookie-priming lykkedes efter %d forsoeg", attempt + 1,
+                )
+            return session
+
+        if resp is not None:
+            if resp.status_code != 200:
+                logger.warning(
+                    "Vinted: cookie-priming fik uventet status %s fra forsiden "
+                    "(forsoeg %d/%d)",
+                    resp.status_code, attempt + 1, max_attempts,
+                )
+            else:
+                logger.warning(
+                    "Vinted: cookie-priming gav status 200 men ingen 'anon_id'-"
+                    "cookie (forsoeg %d/%d) -- Vinted kan have aendret sit "
+                    "cookie-skema",
+                    attempt + 1, max_attempts,
+                )
+
+        if attempt < max_attempts - 1:
+            backoff_s = random.uniform(2, 5) * (attempt + 1)
+            time.sleep(backoff_s)
+
+    logger.warning(
+        "Vinted: cookie-priming fejlede efter %d forsoeg, springer kilden over "
+        "for denne koersel",
+        max_attempts,
+    )
+    return None
 
 
 def _hit_to_listing(hit: dict) -> dict | None:

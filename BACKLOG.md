@@ -22,8 +22,8 @@ bundles) -- opdateres først med FRISK data når Esben aktivt sætter
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
-G14   Vinted-fix: priming-retry+badges  Size 3        NÆSTE
-G15   Størrelse: eksakt/op, aldrig ned  Size 2        TODO
+G14   Vinted-fix: priming-retry+badges  Size 3        DONE
+G15   Størrelse: eksakt/op, aldrig ned  Size 2        NÆSTE
 G6    Stand-normalisering (m. punkt 3)  Size 4-5      TODO
 G16   Vinted land + polsk-nedprioritet  Size 6-7      TODO (afh. profilside)
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
@@ -38,7 +38,7 @@ strammet + mobil-layout-fix.
 
 ## Refinering (Opus, 2026-07-10) — Esbens 6 nye punkter
 
-**G14 (NÆSTE) — Vinted-fix.** Punkt 1 ("Vinted vises ikke") viste sig
+**G14 (DONE, 2026-07-10) — Vinted-fix.** Punkt 1 ("Vinted vises ikke") viste sig
 IKKE at være en data-bug: Turso indeholdt 28 Vinted-matches (flest af
 alle kilder) da det blev undersøgt. Reelle årsager: (a) Vinteds
 cookie-priming (`_prime_session()` i `sources/vinted.py`) rammer
@@ -47,9 +47,15 @@ Vinted-annoncer, og fordi generations-swap OVERSKRIVER alt pr. kørsel,
 forsvinder Vinted da HELT fra det publicerede run. Esben har sandsynligvis
 kigget lige efter et 403-run. (b) Kosmetisk: `sourceBadgeClass()` i
 `docs/index.html` har kun farvede badges for reshopper/dba -- vinted OG
-sellpy falder til grå `badge-source`, lette at overse. **Fix:** (a)
-retry priming 2-3× med backoff (+ evt. UA-rotation) før opgivelse; (b)
-tilføj `badge-vinted`/`badge-sellpy` CSS+grene. Size 3 samlet.
+sellpy falder til grå `badge-source`, lette at overse. **Fix (leveret):**
+(a) `_prime_session()` prøver nu op til 3× med stigende backoff (2-5s,
+4-10s) og roterer mellem 3 browser-UA'er pr. forsøg, før kilden opgives
+for kørslen; (b) `badge-vinted` (cyan)/`badge-sellpy` (grøn) CSS+grene
+tilføjet i `sourceBadgeClass()`. **Verificeret live:** normal priming
+lykkedes på 1. forsøg (anon_id sat); et tvunget 404-scenarie bekræftede
+2 forsøg m. korrekt backoff (~5.6s) før pænt None-fald; `fetch()` end-to-
+end mod ægte Vinted gav 5/5 hits m. pris/størrelse/mærke/sælger udfyldt;
+JS-syntax for `docs/index.html` verificeret med `node --check`. Size 3.
 
 **G15 — Størrelse: eksakt eller næste OP, aldrig mindre.** Punkt 2. I dag
 giver `matching._size_rank()` "nær" ved BEGGE nabostørrelser (104 → både

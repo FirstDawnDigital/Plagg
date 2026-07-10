@@ -82,6 +82,8 @@
   }
   .badge-reshopper { background: #ede9fe; color: #6d28d9; }
   .badge-dba { background: #fee2e2; color: #b91c1c; }
+  .badge-sellpy { background: #dcfce7; color: #15803d; }
+  .badge-vinted { background: #cffafe; color: #0e7490; }
   .badge-source { background: #e2e8f0; color: var(--muted); }
   .badge-rank { background: #dbeafe; color: var(--blue); }
   .seller-name { font-weight: 700; font-size: 15px; flex: 1; min-width: 0; }
@@ -337,6 +339,8 @@
     const s = (source || "").toLowerCase();
     if (s.includes("reshopper")) return "badge-reshopper";
     if (s.includes("dba")) return "badge-dba";
+    if (s.includes("sellpy")) return "badge-sellpy";
+    if (s.includes("vinted")) return "badge-vinted";
     return "badge-source";
   }
   // Samme princip som sheets_output.py's _short_item_ref(): sidste 6 tegn af
