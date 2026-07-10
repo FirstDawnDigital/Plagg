@@ -55,6 +55,13 @@ def _neighbor_sizes(size: str) -> set[str]:
 
 
 def _size_rank(wl_size: str, item_size: str) -> str | None:
+    # G7: oenske UDEN stoerrelse (fx legetoej, boeger, andre boerneting) --
+    # stoerrelse er da ikke et matching-kriterie, saa den blokerer ikke og
+    # traekker heller ikke ned til "naer match". Tom oenske-stoerrelse
+    # matcher enhver (eller ingen) annonce-stoerrelse som "eksakt".
+    wl_size = str(wl_size or "").strip()
+    if not wl_size:
+        return "eksakt"
     item_size = str(item_size or "").strip()
     if item_size == wl_size:
         return "eksakt"

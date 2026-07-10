@@ -206,8 +206,8 @@
           <input id="wl-maerke" type="text" placeholder="fx Ganni (valgfrit)">
         </div>
         <div>
-          <label for="wl-stoerrelse">Størrelse</label>
-          <input id="wl-stoerrelse" type="text" placeholder="fx 74 eller M">
+          <label for="wl-stoerrelse">Størrelse (valgfrit)</label>
+          <input id="wl-stoerrelse" type="text" placeholder="fx 104 — tom for legetøj/bøger">
         </div>
         <div>
           <label for="wl-pris">Maks. pris (kr.) — påkrævet</label>
@@ -570,7 +570,7 @@
       el.innerHTML = items.map(w => `
         <div class="wl-row" data-id="${w.id}">
           <div class="wl-info">
-            <div class="wl-primary">${escapeHtml(w.type)}${w.maerke ? ' — ' + escapeHtml(w.maerke) : ''} · str. ${escapeHtml(w.stoerrelse)}</div>
+            <div class="wl-primary">${escapeHtml(w.type)}${w.maerke ? ' — ' + escapeHtml(w.maerke) : ''}${w.stoerrelse ? ' · str. ' + escapeHtml(w.stoerrelse) : ''}</div>
             <div class="wl-secondary">
               ${w.maks_pris ? 'Maks ' + fmtKr(w.maks_pris) : 'Ingen prisgrænse'}${w.stand ? ' · ' + escapeHtml(w.stand) : ''}
             </div>
@@ -586,7 +586,8 @@
         btn.addEventListener("click", async () => {
           const id = btn.dataset.id;
           const confirmLabel = [btn.dataset.type, btn.dataset.maerke].filter(Boolean).join(" ");
-          const confirmed = confirm(`Slet ${confirmLabel} str. ${btn.dataset.stoerrelse}?`);
+          const sizePart = btn.dataset.stoerrelse ? ` str. ${btn.dataset.stoerrelse}` : "";
+          const confirmed = confirm(`Slet ${confirmLabel}${sizePart}?`);
           if (!confirmed) return;
           btn.disabled = true;
           btn.textContent = "Sletter…";
@@ -619,8 +620,10 @@
     const maksPrisRaw = document.getElementById("wl-pris").value.trim();
     const stand = document.getElementById("wl-stand").value.trim();
 
-    if (!type || !stoerrelse) {
-      errEl.textContent = "Type og størrelse er påkrævet.";
+    // G7: kun type er påkrævet. Størrelse er valgfri -- lad den stå tom for
+    // børneting uden tøjstørrelse (legetøj, bøger osv.).
+    if (!type) {
+      errEl.textContent = "Type er påkrævet.";
       return;
     }
 

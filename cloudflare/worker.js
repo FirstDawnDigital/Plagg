@@ -14,7 +14,7 @@
  *
  * Endpoints:
  *   GET    /api/wishlist       — SELECT * FROM wishlist ORDER BY id
- *   POST   /api/wishlist       — validér (type+stoerrelse påkrævet) + INSERT
+ *   POST   /api/wishlist       — validér (kun type påkrævet, G7) + INSERT
  *   DELETE /api/wishlist/:id   — DELETE WHERE id=?
  *   GET    /api/matches        — filtreret på current_run_id
  *   GET    /api/bundles        — samme filter + JSON.parse(items_json)
@@ -141,10 +141,12 @@ export default {
         // til klienten (NOT NULL-constraint-fejl fra SQLite, ikke en
         // forstaaelig besked). Negative priser blev tidligere accepteret
         // uden validering.
+        // G7: kun TYPE er paakraevet. Stoerrelse er nu valgfri (tom = "stoerrelse
+        // er ikke et kriterie", fx legetoej/boeger uden toejstoerrelse).
         const typeStr = typeof d.type === "string" ? d.type.trim() : "";
         const stoerrelseStr = typeof d.stoerrelse === "string" ? d.stoerrelse.trim() : "";
-        if (!typeStr || !stoerrelseStr) {
-          return json({ error: "type og stoerrelse er påkrævet" }, 400, responseHeaders);
+        if (!typeStr) {
+          return json({ error: "type er påkrævet" }, 400, responseHeaders);
         }
 
         const maksPrisNum = Number(d.maks_pris);

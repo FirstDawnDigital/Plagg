@@ -36,8 +36,13 @@ def _normalize_row(row: dict) -> dict | None:
                 break
         normalized[field] = value
 
-    if not normalized.get("type") or not normalized.get("stoerrelse"):
-        return None  # tom/ufuldstaendig raekke, spring over
+    # G7: kun TYPE er paakraevet. Stoerrelse er nu valgfri, saa boerneting uden
+    # t/ med en anden stoerrelsesskala (legetoej, boeger osv.) ogsaa kan staa
+    # paa oenskesedlen -- tom stoerrelse betyder "stoerrelse er ikke et kriterie"
+    # (se matching._size_rank). En raekke helt uden type er stadig en
+    # tom/ufuldstaendig raekke der springes over.
+    if not normalized.get("type"):
+        return None
 
     raw_price = normalized.get("maks_pris")
     try:
@@ -50,7 +55,8 @@ def _normalize_row(row: dict) -> dict | None:
 
     normalized["maerke"] = str(normalized.get("maerke") or "").strip()
     normalized["type"] = str(normalized["type"]).strip().lower()
-    normalized["stoerrelse"] = str(normalized["stoerrelse"]).strip()
+    # G7: stoerrelse kan nu vaere None (valgfri) -- guard mod str(None)="None".
+    normalized["stoerrelse"] = str(normalized.get("stoerrelse") or "").strip()
     normalized["stand"] = str(normalized.get("stand") or "").strip()
     return normalized
 
