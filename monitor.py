@@ -12,26 +12,54 @@ brief.md for den fulde opgavebeskrivelse, BACKLOG.md for F1-spikens fund
 Kør: python monitor.py [--dry-run] [--source reshopper|dba]
 """
 import argparse
+import concurrent.futures
 import datetime
 import logging
 import logging.handlers
+import os
 import sys
 
 import yaml
 
 import bundling
 import db
+import hang_guard
 import matching
 import sheets_output
 import turso_io
 import wishlist as wishlist_module
 from sources import dba, reshopper, sellpy, vinted
 
+# Haard global graense for HELE monitor.py-processens koerselstid, UANSET
+# hvordan den kaldes (direkte `python3 monitor.py`, via trigger_watcher.py,
+# eller ad-hoc af en agent) -- se hang_guard.py's docstring for hvorfor. Dette
+# er sikkerhedsnettet der ville have fanget natten-mellem-2026-07-09/10s
+# 8+-timers-haengning (som skete ved en DIREKTE koersel, altsaa UDEN
+# trigger_watcher.py's eget RUN_TIMEOUT_S=30*60 subprocess-timeout som
+# sikkerhedsnet). Sat lavere end trigger_watcher.py's 30 min, saa DENNE
+# watchdog naar at gribe ind foerst og logge en tydelig "WATCHDOG"-besked
+# FOER trigger_watcher.py's subprocess.run(timeout=...) i stedet ville have
+# afbrudt processen udefra uden nogen forklarende besked i monitor.log.
+# Overskriv med config.yaml's 'watchdog_timeout_s' hvis 22 min. viser sig for
+# stramt/loest i praksis (se J6-fundet i trigger_watcher.py: reelle koersler
+# har spaendt 2,5-14 min., saa 22 min. giver rigelig margen uden at aabne for
+# timevis-lange haengninger).
+DEFAULT_WATCHDOG_TIMEOUT_S = 22 * 60
+
 SOURCE_MODULES = {
     "reshopper": reshopper,
     "dba": dba,
     "sellpy": sellpy,
     "vinted": vinted,
+}
+
+# Visningsnavne til kilde-fremdriftsindikatoren (se main()) -- rene kosmetik,
+# paavirker intet i selve scraping-logikken.
+SOURCE_DISPLAY_NAMES = {
+    "reshopper": "Reshopper",
+    "dba": "DBA",
+    "sellpy": "Sellpy",
+    "vinted": "Vinted",
 }
 
 logger = logging.getLogger("personal_shopper")
@@ -71,13 +99,20 @@ def build_search_terms(wishlist: list[dict]) -> list[str]:
     return terms
 
 
-def run_source(source_name: str, source_module, config: dict, wishlist: list[dict], dry_run: bool) -> tuple[list[dict], list[dict], bool]:
-    """Koerer én kilde (reshopper ELLER dba -- begge foelger samme to-fase-
-    fetch()/fetch_details()-kontrakt, se sources/reshopper.py og
-    sources/dba.py) i eget try/except -- en fejl her maa aldrig vaelte
-    resten af scriptet (samme princip som PA SPEAKERS-arkivets
-    monitor.py:run_source). Returnerer (matches, bundles, ok) -- tomme lister
-    og ok=False hvis kilden fejler helt (undtagelse undervejs), ok=True hvis
+def run_source(
+    source_name: str,
+    source_module,
+    config: dict,
+    wishlist: list[dict],
+    dry_run: bool,
+    cached_details: dict | None = None,
+) -> tuple[list[dict], list[dict], bool, list[dict]]:
+    """Koerer én kilde (reshopper/dba/sellpy/vinted -- alle foelger samme
+    to-fase fetch()/fetch_details()-kontrakt, se sources/*.py) i eget
+    try/except -- en fejl her maa aldrig vaelte resten af scriptet (samme
+    princip som PA SPEAKERS-arkivets monitor.py:run_source). Returnerer
+    (matches, bundles, ok, detail_cached_candidates) -- tomme lister og
+    ok=False hvis kilden fejler helt (undtagelse undervejs), ok=True hvis
     kilden koerte igennem uden undtagelse (ogsaa hvis den reelt fandt 0
     matches -- det er en gyldig markedstilstand, ikke en fejl). G5-FIX
     (fund #4): denne ok-status bruges af main() til at skelne "koerte, fandt
@@ -85,9 +120,25 @@ def run_source(source_name: str, source_module, config: dict, wishlist: list[dic
     tomme resultater naar ALLE kilder reelt bare fejlede (fx forbigaaende
     netvaerksfejl).
 
+    G10 (hastighedsoptimering): 'cached_details' er db.cached_details_map()'s
+    resultat (id -> {brand, size, stand, seller_name, seller_id,
+    shipping_price}), laest ÉN gang i hovedtraaden FOER kilderne startes (se
+    main()) og givet videre som et READ-ONLY dict til hver kildes
+    worker-traad -- samtidig laesning af samme dict fra flere traade er
+    sikkert i Python, kun skrivning kraever hovedtraad-disciplin (allerede
+    etableret). For enhver kandidat-URL hvis id (db.make_id) findes i
+    cached_details springer vi det dyre fetch_details()-kald HELT over og
+    genbruger brand/size/stand/seller_name/seller_id/shipping_price derfra --
+    prisen tages ALTID fra det friske kort, aldrig fra cachen (den kan aendre
+    sig). 'detail_cached_candidates' i returvaerdien er den fjerde tuple-
+    indgang: ALLE kandidater (match eller ej) der har rigtige detaljer denne
+    koersel -- caller (main()) skal upserte disse til DB, saa det arkitektur-
+    hul lukkes hvor kun matches blev cachet tidligere.
+
     Udtrukket fra den oprindelige (Reshopper-specifikke) run_reshopper() ved
     G1 (DBA som ny kilde) -- selve fase 1/fase 2-logikken var identisk paa
     tvaers af kilder, kun kildenavnet og modulet skifter."""
+    cached_details = cached_details or {}
     try:
         logger.info("=== Starter kilde: %s ===", source_name)
         search_config = dict(config)
@@ -97,7 +148,7 @@ def run_source(source_name: str, source_module, config: dict, wishlist: list[dic
         raw_listings = source_module.fetch(search_config, dry_run=dry_run)
         logger.info("%s: %d raa annonce(r) hentet", source_name, len(raw_listings))
         if not raw_listings:
-            return [], [], True
+            return [], [], True, []
 
         # Fase 1: billig foerfiltrering (pris/type/stoerrelse) FOER vi besoeger
         # en eneste annoncedetaljeside -- se matching.py:precheck().
@@ -112,36 +163,97 @@ def run_source(source_name: str, source_module, config: dict, wishlist: list[dic
         logger.info("%s: %d kandidat(er) efter foerfiltrering (af %d raa)", source_name, len(candidate_urls), len(raw_listings))
 
         if not candidate_urls:
-            return [], [], True
-
-        # Fase 2: detalje-opslag KUN for kandidater -- saelger/stand/fragt.
-        details_by_url = source_module.fetch_details(candidate_urls, search_config, dry_run=dry_run)
+            return [], [], True, []
 
         by_url = {l["url"]: l for l in raw_listings}
+
+        # G10 (hastighedsoptimering): opdel kandidaterne i tre grupper FOER vi
+        # kalder det dyre fetch_details():
+        #   1. Kilder hvor fetch_details() er en BEVIDST no-op (Sellpy/Vinted,
+        #      se de moduler) -- raa-kortet indeholder allerede ALLE detaljer
+        #      (strukturelt signal: 'seller_name' findes allerede i kortets
+        #      egen dict, modsat Reshopper/DBA hvor den KUN tilfoejes via
+        #      fetch_details()). Disse skal aldrig i detalje-opslags-listen.
+        #   2. Kandidater vi allerede har detalje-hentet succesfuldt i en
+        #      TIDLIGERE koersel (samme id = hash(kilde+url), se
+        #      db.cached_details_map()) -- genbruges direkte, INGEN
+        #      netvaerkskald. Sparer 5-15s Playwright-throttling PR. kandidat
+        #      for Reshopper/DBA.
+        #   3. Resten -- helt nye kandidater, som stadig skal have det fulde
+        #      fetch_details()-opslag.
+        already_complete_urls = {url for url in candidate_urls if "seller_name" in by_url[url]}
+        cache_hits: dict[str, dict] = {}
+        new_detail_urls = []
+        for url in candidate_urls:
+            if url in already_complete_urls:
+                continue
+            cached = cached_details.get(db.make_id(source_name, url))
+            if cached is not None:
+                cache_hits[url] = cached
+            else:
+                new_detail_urls.append(url)
+
+        logger.info(
+            "%s: %d kandidat(er) i alt -- %d allerede komplette fra kortet, "
+            "%d genbrugt fra detalje-cache, %d nye detalje-opslag noedvendige",
+            source_name, len(candidate_urls), len(already_complete_urls),
+            len(cache_hits), len(new_detail_urls),
+        )
+
+        # Fase 2: detalje-opslag KUN for de nye, ufordoejede kandidater.
+        details_by_url = (
+            source_module.fetch_details(new_detail_urls, search_config, dry_run=dry_run)
+            if new_detail_urls else {}
+        )
+
         enriched = []
+        detail_cached_candidates = []
         for url in candidate_urls:
             listing = dict(by_url[url])
-            detail = details_by_url.get(url)
-            if detail:
-                listing.update(detail)
+            details_ok = False
+            if url in already_complete_urls:
+                # Allerede fuldt beriget af fetch() selv -- intet at goere.
+                details_ok = True
+            elif url in cache_hits:
+                # G10: genbrug brand/size/stand/seller_name/seller_id/
+                # shipping_price fra et TIDLIGERE lykkedes detalje-opslag.
+                # Prisen ('price') er IKKE del af cache_hits-dict'et og
+                # forbliver derfor den friske vaerdi fra by_url ovenfor --
+                # det er hele pointen, pris kan aendre sig og skal altid
+                # afspejle det aktuelle soegeresultat.
+                listing.update(cache_hits[url])
+                details_ok = True
             else:
-                # Detalje-opslag fejlede for denne ene annonce -- vi medtager den
-                # stadig, blot uden stand/saelger/fragt (markeres "ukendt" i
-                # matching.py's brand-tjek naar maerke er tomt paa oensket).
-                listing.setdefault("stand", "ukendt")
-                listing.setdefault("seller_name", "ukendt")
-                listing.setdefault("seller_id", None)
-                listing.setdefault("shipping_price", None)
-                listing.setdefault("brand", None)
+                detail = details_by_url.get(url)
+                if detail:
+                    listing.update(detail)
+                    details_ok = True
+                else:
+                    # Detalje-opslag fejlede for denne ene annonce -- vi medtager den
+                    # stadig, blot uden stand/saelger/fragt (markeres "ukendt" i
+                    # matching.py's brand-tjek naar maerke er tomt paa oensket).
+                    # IKKE cachet (details_ok forbliver False) -- forsoeges igen
+                    # naeste koersel i stedet for at forblive "ukendt" for evigt.
+                    listing.setdefault("stand", "ukendt")
+                    listing.setdefault("seller_name", "ukendt")
+                    listing.setdefault("seller_id", None)
+                    listing.setdefault("shipping_price", None)
+                    listing.setdefault("brand", None)
             listing["source"] = source_name
             enriched.append(listing)
+            if details_ok:
+                # G10-FIX (arkitektur-hul): gemmes UANSET om denne kandidat
+                # ender med at matche noget oenske herunder -- ellers ville en
+                # detalje-hentet ikke-match blive gen-hentet unoedigt igen og
+                # igen. main() upserter denne liste til DB (details_fetched=1).
+                detail_cached_candidates.append(dict(listing))
 
         matches = matching.match_all(wishlist, enriched)
         bundles = bundling.build_bundles(matches, config.get("bundling", {}).get("default_shipping_dkk", 39.0))
-        return matches, bundles, True
+        return matches, bundles, True, detail_cached_candidates
     except Exception:
         logger.exception("%s: kilden fejlede, springer over -- resten af scriptet paavirkes ikke", source_name)
-        return [], [], False
+        return [], [], False, []
 
 
 def main() -> int:
@@ -152,6 +264,32 @@ def main() -> int:
 
     config = load_config()
     setup_logging(config.get("log_path", "monitor.log"))
+
+    # os.setsid(): goer denne proces til sin egen session-/proces-GRUPPE-
+    # leder, saa enhver Playwright-driver/Chromium-underproces den senere
+    # spawner (sources/reshopper.py, sources/dba.py) som udgangspunkt arver
+    # SAMME proces-gruppe. Det er forudsaetningen for at watchdog'ens
+    # os.killpg(...)-nooedbremse (se hang_guard.py) rammer BAADE denne proces
+    # OG dens Chromium-underprocesser i ét hug, i stedet for at efterlade
+    # forældreloese/"zombie" Chromium-processer bagved (praecis den risiko
+    # der blev tjekket for og IKKE fundet paa maskinen under denne haerdning,
+    # men som vi ikke vil RISIKERE at skabe fremover). Fejler kaldet (fx fordi
+    # processen allerede er sessionsleder, eller platformen ikke understoetter
+    # det) er det harmloest -- watchdog'en falder da tilbage til et almindeligt
+    # os._exit(1), som stadig dræber selve Python-processen.
+    try:
+        os.setsid()
+    except Exception:
+        logger.debug("os.setsid() fejlede/ikke noedvendigt (harmloest, ignoreres)", exc_info=True)
+
+    # HAARD global watchdog (se hang_guard.py + DEFAULT_WATCHDOG_TIMEOUT_S
+    # ovenfor) -- garanterer at DENNE proces aldrig kan koere laengere end
+    # graensen, uanset hvordan den blev startet. .cancel() kaldes lige foer
+    # HVER return-vej i main() nedenfor (kun to: den tidlige "ingen
+    # oenskeseddel"-fejl og den normale slutning).
+    watchdog_timeout_s = config.get("watchdog_timeout_s", DEFAULT_WATCHDOG_TIMEOUT_S)
+    watchdog = hang_guard.install_hard_watchdog(watchdog_timeout_s, logger)
+    logger.info("Watchdog: haard graense sat til %.0f min. for denne koersel", watchdog_timeout_s / 60.0)
 
     if args.dry_run:
         logger.info("--dry-run aktiv: skriver ikke til DB eller Sheets")
@@ -182,9 +320,32 @@ def main() -> int:
     except Exception:
         logger.exception("Turso: opsaetningen fejlede (config-load og/eller skema), fortsaetter uden Turso")
 
+    # G5: output-skrivning er en loekke over config["output"]["targets"] --
+    # default ["sheet"] hvis noeglen mangler, for bagudkompatibilitet med
+    # config.yaml-filer skrevet foer G5. Flyttet OP (var tidligere defineret
+    # lige foer selve output-skrivningen nedenfor) fordi kilde-
+    # fremdriftsindikatoren (se write_progress_status() nedenfor) ogsaa har
+    # brug for at vide hvilke maal der er aktive, LAENGE foer output-
+    # skrivningen finder sted.
+    targets = config.get("output", {}).get("targets", ["sheet"])
+
+    # Kilde-fremdriftsindikator: Kontrolpanel-fanen slaas op ÉN gang her (hvis
+    # Sheets er et aktivt output-target) i stedet for for hver af de 4 kilders
+    # fremdrifts-opdatering -- sparer unoedvendige gspread-kald. En fejl her er
+    # ikke kritisk: control_ws forbliver None og write_progress_status()
+    # springer Sheets-delen over.
+    control_ws = None
+    if "sheet" in targets and spreadsheet is not None:
+        try:
+            control_tab_name = config.get("trigger", {}).get("control_tab_name", "Kontrolpanel")
+            control_ws = sheets_output.ensure_control_tab(spreadsheet, control_tab_name)
+        except Exception:
+            logger.warning("Sheets: kunne ikke aabne Kontrolpanel-fanen til kilde-fremdriftsstatus, springer over", exc_info=True)
+
     wishlist = wishlist_module.load_wishlist(config, spreadsheet=spreadsheet)
     if not wishlist:
         logger.error("Ingen oenskeseddel-items indlaest -- intet at soege efter. Stopper.")
+        watchdog.cancel()
         return 1
     logger.info("Ønskeseddel: %d item(s): %s", len(wishlist), [
         f"{w['type']}/{w.get('maerke') or 'generisk'}/{w['stoerrelse']} (maks {w['maks_pris']} kr.)" for w in wishlist
@@ -202,49 +363,179 @@ def main() -> int:
     any_source_succeeded = False
     with db.connect(config.get("db_path", "seen.db")) as conn:
         first_seen_lookup = db.first_seen_map(conn)
+        # G10 (hastighedsoptimering): laeses ÉN gang her i hovedtraaden FOER
+        # kilderne startes parallelt nedenfor (ikke inde i hver worker-traad --
+        # det ville betyde gentagne SQLite-kald for intet, da dict'et alligevel
+        # er read-only for resten af koerslen). Gives som read-only parameter
+        # til hver kildes run_source()-kald, se db.cached_details_map()'s
+        # docstring for hvorfor samtidig laesning fra flere traade er sikkert.
+        cached_details = db.cached_details_map(conn)
+        logger.info("Detalje-cache: %d annonce(r) med genbrugelige detaljer fundet i %s", len(cached_details), config.get("db_path", "seen.db"))
         now_iso = datetime.datetime.utcnow().isoformat()
 
         sources_to_run = [args.source] if args.source else list(SOURCE_MODULES.keys())
-        for name in sources_to_run:
-            source_module = SOURCE_MODULES.get(name)
-            if source_module is None:
-                logger.warning("Ukendt kilde konfigureret: %s, springer over", name)
-                continue
-            matches, bundles, source_ok = run_source(name, source_module, config, wishlist, args.dry_run)
-            if source_ok:
-                any_source_succeeded = True
 
-            for m in matches:
-                listing_id = db.make_id(m.get("source", name), m["url"])
-                m["_db_id"] = listing_id
-                row = {
-                    "id": listing_id,
-                    "source": m.get("source", name),
-                    "item_id": m.get("item_id"),
-                    "title": m.get("title"),
-                    "brand": m.get("brand"),
-                    "size": m.get("size"),
-                    "price": m.get("price"),
-                    "stand": m.get("stand"),
-                    "seller_name": m.get("seller_name"),
-                    "seller_id": m.get("seller_id"),
-                    "shipping_price": m.get("shipping_price"),
-                    "url": m.get("url"),
-                    "match_rank": m.get("match_rank"),
-                    "wishlist_type": m.get("wishlist_type"),
-                    "wishlist_maerke": m.get("wishlist_maerke"),
-                    "wishlist_stoerrelse": m.get("wishlist_stoerrelse"),
-                    "first_seen": first_seen_lookup.get(listing_id, now_iso),
-                    "last_seen": now_iso,
-                }
-                db.upsert_listing(conn, row, dry_run=args.dry_run)
-                # Opdatér lookup'en saa ogsaa NYE items (foerste gang set i denne
-                # koersel) har korrekt first_seen tilgaengeligt til Sheets/CSV-output
-                # nedenfor, ikke kun items der allerede fandtes i seen.db.
-                first_seen_lookup[listing_id] = row["first_seen"]
+        # Kilde-fremdriftsindikator: hvilke kilder er faerdige lige nu. Vises i
+        # ALFABETISK raekkefoelge (konsistent uanset i hvilken raekkefoelge
+        # kilderne reelt bliver faerdige -- typisk Sellpy/Vinted foerst, saa
+        # DBA/Reshopper) saa brugeren ikke skal taenke over at raekkefoelgen
+        # hopper rundt mellem koersler.
+        completed_sources: set[str] = set()
 
-            all_matches.extend(matches)
-            all_bundles.extend(bundles)
+        def progress_status_text() -> str:
+            parts = [
+                f"{SOURCE_DISPLAY_NAMES.get(n, n)} {'✓' if n in completed_sources else '…'}"
+                for n in sorted(sources_to_run)
+            ]
+            return "Kører... (" + ", ".join(parts) + ")"
+
+        def write_progress_status() -> None:
+            """Skriver den loebende kilde-fremdriftsstatus til BAADE Sheets
+            og Turso -- kun de maal der reelt er konfigureret i
+            output.targets (samme moenster som selve output-skrivningen
+            nedenfor). En fejl her (fx Sheets/Turso midlertidigt utilgaengelig)
+            maa ALDRIG stoppe selve koerslen, kun logges som en advarsel."""
+            if args.dry_run:
+                return
+            text = progress_status_text()
+            if control_ws is not None:
+                try:
+                    sheets_output.set_status(control_ws, text)
+                except Exception:
+                    logger.warning("Sheets: kunne ikke skrive kilde-fremdriftsstatus (%r) -- fortsaetter koerslen", text, exc_info=True)
+            if "turso" in targets and turso_url and turso_token:
+                try:
+                    turso_io.set_status(turso_url, turso_token, text)
+                except Exception:
+                    logger.warning("Turso: kunne ikke skrive kilde-fremdriftsstatus (%r) -- fortsaetter koerslen", text, exc_info=True)
+
+        try:
+            write_progress_status()  # initial status foer nogen kilde er faerdig
+        except Exception:
+            logger.warning("Kunne ikke skrive indledende kilde-fremdriftsstatus -- fortsaetter koerslen", exc_info=True)
+
+        # G6 (hastighedsoptimering): de 4 kilder koeres nu SAMTIDIGT i stedet
+        # for sekventielt -- hver kildes fetch()/fetch_details() er allerede
+        # uafhaengig (egen Playwright-browser-instans hhv. HTTP-session pr.
+        # kilde, se sources/reshopper.py, sources/dba.py, sources/sellpy.py,
+        # sources/vinted.py) og deler kun wishlist/config, som KUN LAESES,
+        # aldrig skrives, af run_source(). Reshopper og DBAs 5-15s tilfaeldige
+        # detalje-opslags-throttling var hovedaarsagen til at en fuld koersel
+        # tog 14+ minutter sekventielt -- naar de i stedet overlapper i tid
+        # falder den samlede tid til ca. den LANGSOMSTE enkeltkilde, ikke
+        # summen af alle fire. VIGTIGT: dette aendrer INTET ved den enkelte
+        # kildes egen kadence/throttling -- hver kilde venter stadig sin egen
+        # min_delay_s/max_delay_s mellem sine egne detalje-opslag, akkurat som
+        # naar den koerer alene.
+        #
+        # sqlite3-forbindelser er IKKE traadsikre, saa selve DB-upsertet
+        # (conn) sker udelukkende i hovedtraaden nedenfor, EFTER hver kildes
+        # Future bliver faerdig via as_completed() -- aldrig inde i en
+        # worker-traad.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(sources_to_run))) as executor:
+            future_to_name = {}
+            for name in sources_to_run:
+                source_module = SOURCE_MODULES.get(name)
+                if source_module is None:
+                    logger.warning("Ukendt kilde konfigureret: %s, springer over", name)
+                    continue
+                future = executor.submit(run_source, name, source_module, config, wishlist, args.dry_run, cached_details)
+                future_to_name[future] = name
+
+            for future in concurrent.futures.as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    matches, bundles, source_ok, detail_candidates = future.result()
+                except Exception:
+                    # Ekstra sikkerhedsnet: run_source() fanger allerede ALLE
+                    # exceptions internt og returnerer ([], [], False, []), saa
+                    # denne gren boer reelt aldrig ramme -- men en Future maa
+                    # under ingen omstaendigheder kunne vaelte resten af
+                    # koerslen, heller ikke ved en helt uforudset fejl (fx i
+                    # selve ThreadPoolExecutor-maskineriet).
+                    logger.exception("%s: uventet fejl i kilde-future (boer ikke kunne ske, run_source() fanger internt) -- springer over", name)
+                    matches, bundles, source_ok, detail_candidates = [], [], False, []
+
+                if source_ok:
+                    any_source_succeeded = True
+
+                # G10-FIX (arkitektur-hul): baseline-cache ALLE detalje-hentede
+                # kandidater fra denne kilde -- UANSET om de ender med at
+                # matche noget oenske i loopet herunder. Skrives FOER
+                # matches-loopet, saa et EVENTUELT reelt match kan overskrive
+                # match_rank/wishlist_*-felterne med de rigtige vaerdier lige
+                # bagefter (se db.py's ON CONFLICT-logik og upsert_listing()'s
+                # docstring) -- uden dette ville en kandidat der blev
+                # detalje-hentet men IKKE matchede noget oenske ALDRIG blive
+                # gemt, og derfor blive detalje-hentet unoedigt igen og igen.
+                for c in detail_candidates:
+                    listing_id = db.make_id(c.get("source", name), c["url"])
+                    row = {
+                        "id": listing_id,
+                        "source": c.get("source", name),
+                        "item_id": c.get("item_id"),
+                        "title": c.get("title"),
+                        "brand": c.get("brand"),
+                        "size": c.get("size"),
+                        "price": c.get("price"),
+                        "stand": c.get("stand"),
+                        "seller_name": c.get("seller_name"),
+                        "seller_id": c.get("seller_id"),
+                        "shipping_price": c.get("shipping_price"),
+                        "url": c.get("url"),
+                        "match_rank": None,
+                        "wishlist_type": None,
+                        "wishlist_maerke": None,
+                        "wishlist_stoerrelse": None,
+                        "first_seen": first_seen_lookup.get(listing_id, now_iso),
+                        "last_seen": now_iso,
+                        "details_fetched": 1,
+                    }
+                    db.upsert_listing(conn, row, dry_run=args.dry_run)
+                    first_seen_lookup[listing_id] = row["first_seen"]
+
+                for m in matches:
+                    listing_id = db.make_id(m.get("source", name), m["url"])
+                    m["_db_id"] = listing_id
+                    row = {
+                        "id": listing_id,
+                        "source": m.get("source", name),
+                        "item_id": m.get("item_id"),
+                        "title": m.get("title"),
+                        "brand": m.get("brand"),
+                        "size": m.get("size"),
+                        "price": m.get("price"),
+                        "stand": m.get("stand"),
+                        "seller_name": m.get("seller_name"),
+                        "seller_id": m.get("seller_id"),
+                        "shipping_price": m.get("shipping_price"),
+                        "url": m.get("url"),
+                        "match_rank": m.get("match_rank"),
+                        "wishlist_type": m.get("wishlist_type"),
+                        "wishlist_maerke": m.get("wishlist_maerke"),
+                        "wishlist_stoerrelse": m.get("wishlist_stoerrelse"),
+                        "first_seen": first_seen_lookup.get(listing_id, now_iso),
+                        "last_seen": now_iso,
+                        # Et match er pr. definition detalje-hentet (ellers kunne
+                        # matching.py ikke have bekraeftet maerke/pris) -- markeres
+                        # ogsaa her, redundant men harmloest ift. baseline-loopet
+                        # ovenfor (samme id, samme vaerdi).
+                        "details_fetched": 1,
+                    }
+                    db.upsert_listing(conn, row, dry_run=args.dry_run)
+                    # Opdatér lookup'en saa ogsaa NYE items (foerste gang set i denne
+                    # koersel) har korrekt first_seen tilgaengeligt til Sheets/CSV-output
+                    # nedenfor, ikke kun items der allerede fandtes i seen.db.
+                    first_seen_lookup[listing_id] = row["first_seen"]
+
+                all_matches.extend(matches)
+                all_bundles.extend(bundles)
+
+                completed_sources.add(name)
+                try:
+                    write_progress_status()
+                except Exception:
+                    logger.warning("Kunne ikke opdatere kilde-fremdriftsstatus efter %s -- fortsaetter koerslen", name, exc_info=True)
 
     now_str = datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
     logger.info("=== Samlet resultat: %d match(es), %d saelger-bundle(s) ===", len(all_matches), len(all_bundles))
@@ -254,8 +545,8 @@ def main() -> int:
     # config.yaml-filer skrevet foer G5. "sheet"-grenen er 100% UAENDRET
     # (samme kode/CSV-fallback som altid). "turso"-grenen er NY og koerer i
     # sit EGET try/except -- en Turso-fejl maa ALDRIG paavirke Sheets-output
-    # eller omvendt.
-    targets = config.get("output", {}).get("targets", ["sheet"])
+    # eller omvendt. (`targets` er defineret laengere oppe i main(), foer
+    # kilde-fremdriftsindikatoren, som ogsaa har brug for den.)
 
     # G5-FIX (fund #4): hvis ALLE konfigurerede kilder fejlede med en
     # undtagelse denne koersel (ingen af dem naaede at koere igennem), er
@@ -305,6 +596,7 @@ def main() -> int:
             else:
                 logger.warning("output.targets: ukendt maal %r, springer over", target)
 
+    watchdog.cancel()
     return 0
 
 

@@ -56,6 +56,15 @@ from urllib.parse import quote
 
 logger = logging.getLogger("personal_shopper.dba")
 
+# HAERDNINGS-NOTE (2026-07-10) -- se sources/reshopper.py's identiske note og
+# hang_guard.py's docstring: en traad-baseret timeout-wrapper omkring
+# context.close()/browser.close() blev proevet og forkastet (test_hang_
+# diagnostics.py afsloerede at det oedelaegger Playwrights sync-API paa tvaers
+# af traade -- 'greenlet.error: cannot switch to a different thread'). Den
+# reelle beskyttelse mod et haengende close()-kald her er monitor.py's
+# globale proces-watchdog (hang_guard.install_hard_watchdog), som IKKE
+# roerer noget Playwright-objekt direkte.
+
 BASE_URL = "https://www.dba.dk"
 SEARCH_URL_TMPL = BASE_URL + "/recommerce/forsale/search?q={query}"
 
@@ -458,7 +467,10 @@ def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[
                             "DBA: bot-wall/challenge moedt under detalje-opslag, "
                             "springer RESTEN af detalje-opslagene over for denne koersel"
                         )
-                        context.close()
+                        # context.close() sker i finally-blokken nedenfor --
+                        # de eksplicitte close()-kald her (og ved udloebet
+                        # session lige nedenfor) blev tidligere kaldt IGEN,
+                        # et (harmloest, men unoedvendigt) dobbelt close().
                         break
 
                     if not session_checked:
@@ -468,7 +480,6 @@ def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[
                                 "detalje-opslag. STOPPER -- eskalér til Esben (se "
                                 "BACKLOG.md's G1-fund), forsoeger IKKE at logge ind."
                             )
-                            context.close()
                             break
                         session_checked = True
 

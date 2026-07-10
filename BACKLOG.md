@@ -29,8 +29,68 @@ G3    Beskedudkast + reservation        WSJF 2.0      TODO
 ```
 
 Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
-G8 (Sellpy-kilde), G9 (Vinted-kilde), J4-J7 (kritikrunde 2), +
-bundle-definition strammet + mobil-layout-fix.
+G8 (Sellpy-kilde), G9 (Vinted-kilde), J4-J7 (kritikrunde 2),
+G10-G12 (hastighedsoptimering + hængnings-hærdning), + bundle-definition
+strammet + mobil-layout-fix.
+
+**G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
+
+Baggrund: en komplet 4-kilde-kørsel tog 14m10s, hvoraf Sheets/Turso-
+skrivning kun udgjorde ~3 sekunder (0,3%) -- HELE tiden gik på Reshopper/
+DBAs bevidste 5-15s throttling pr. detalje-opslag. At slukke for Sheets
+ville altså ikke have givet nogen målbar gevinst.
+
+- **G10 (parallellisering):** de 4 kilder køres nu SAMTIDIGT via
+  `ThreadPoolExecutor` i stedet for sekventielt (`monitor.py`) -- hver
+  kildes egen kadence/throttling er UÆNDRET, kun at flere kilders
+  uafhængige arbejde nu overlapper i tid. SQLite-skrivninger sker
+  fortsat udelukkende i hovedtråden (sqlite3 er ikke trådsikkert).
+  Målt: **14m10s → 7m25s** (næsten halveret) på en rigtig kørsel, alle 4
+  kilder bekræftet startet på samme sekund i loggen.
+- **Kilde-fremdriftsindikator:** statusteksten opdateres nu løbende
+  efterhånden som hver kilde bliver færdig (fx "Kører... (Sellpy ✓,
+  Vinted ✓, DBA …, Reshopper …)"), skrevet til både Sheets Kontrolpanel
+  og Turso (afhængig af `output.targets`). Kendt, forventet adfærd (IKKE
+  en fejl): et kort vindue hvor alle kilder viser ✓ men status endnu
+  ikke er skiftet til det ægte "Færdig" kan forekomme, fordi
+  `trigger_watcher.py` først sætter den endelige status EFTER at
+  `monitor.py`-processen er helt afsluttet (Sheets/Turso-output +
+  process-exit), et par sekunder efter sidste kildes ✓.
+- **G11 (detalje-cache):** `db.py`s `listings`-tabel fik en ny
+  `details_fetched`-kolonne. En kandidat-annonce der allerede er
+  detalje-hentet FØR (uanset om den dengang matchede noget ønske eller
+  ej -- vigtigt arkitektur-hul lukket, se nedenfor) springer det dyre
+  detalje-opslag helt over ved gensyn; kun prisen opdateres altid fra
+  den friske søgeresultat-side. Kun HELT NYE annonce-id'er detalje-
+  hentes. `upsert_listing()` har upgrade-only-logik (`details_fetched`
+  nedgraderes aldrig 1→0). Bekræftet i praksis: en kørsel viste "55
+  kandidater i alt -- 55 allerede komplette fra kortet" for Sellpy, og
+  55 rækker fik `details_fetched=1` i databasen selvom kun 10 reelt
+  matchede et ønske -- arkitektur-hullet (kun matches blev tidligere
+  cachet) er lukket. Reshopper/DBAs fulde tidsbesparelse ved høj
+  cache-hit-rate er endnu ikke målt over en komplet kørsel (test blev
+  afbrudt undervejs), men mekanismen er verificeret korrekt isoleret.
+- **G12 (hængnings-hærdning):** to hængninger er observeret (en 8+
+  timers hængning natten 2026-07-09/10 FØR parallellisering, og en
+  kortere ~40 min. stilstand under et testforsøg -- sidstnævnte
+  formentlig blot en afbrudt forgrundsproces, ikke en kodefejl). Et
+  grundigt stress-testbatteri (`test_hang_diagnostics.py`, 36
+  iterationer, sekventielt + parallelt, alle 4 kilder) kunne IKKE
+  reproducere nogen hængning -- alle kald (inkl. `browser.close()`/
+  `context.close()`, som var mistænkte efter parallelliseringen)
+  fuldførte sundt (maks 1,85 sek., langt under de eksisterende 25-30s
+  timeouts). Rodårsagen til den oprindelige 8-timers-hængning forbliver
+  derfor ubekræftet. I stedet er der bygget et generelt sikkerhedsnet
+  (`hang_guard.py`): en hård, tråd-baseret proces-watchdog
+  (`install_hard_watchdog`, default 22 min.) i `monitor.py`s `main()`
+  der GARANTERER at processen aldrig kan hænge stille i timevis igen,
+  uanset årsag eller hvordan den kaldes (direkte, via
+  `trigger_watcher.py`, eller ad-hoc). **Ærligt forbehold, vigtig
+  læring:** et forsøg på at wrappe selve Playwrights `close()`-kald i en
+  tråd-baseret timeout blev testet og VISTE SIG at ødelægge Playwrights
+  sync-API (`greenlet.error: cannot switch to a different thread`) --
+  droppet igen, Playwright-objekter håndteres derfor fortsat direkte/
+  synkront, med den globale proces-watchdog som den reelle beskyttelse.
 
 **G9 leveret (2026-07-10):** `sources/vinted.py` -- anonym cookie-priming
 (`GET vinted.dk/` sætter `anon_id`/`access_token_web`) + `GET

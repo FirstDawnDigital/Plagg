@@ -20,6 +20,7 @@ matches_fallback.csv
 bundles_fallback.csv
 watch_*
 cloudflare/.wrangler/
+test_hang_diagnostics.log
 
 # Credentials -- kopiér ALDRIG service account-noeglefiler ind i dette repo.
 # config.yaml peger paa credentials-filen med en ABSOLUT sti udenfor repoet

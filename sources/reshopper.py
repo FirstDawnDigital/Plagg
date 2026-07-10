@@ -39,6 +39,20 @@ from urllib.parse import quote
 
 logger = logging.getLogger("personal_shopper.reshopper")
 
+# HAERDNINGS-NOTE (2026-07-10, se hang_guard.py's docstring): Playwrights
+# close()-metoder har INGEN timeout-parameter (bekraeftet mod installeret
+# playwright==1.61.0 -- kun et 'reason'-keyword). Vi proevede en traad-baseret
+# timeout-wrapper omkring context.close()/browser.close() nedenfor, men
+# test_hang_diagnostics.py afsloerede at det AKTIVT OEDELAEGGER Playwrights
+# sync-API (greenlet.error: cannot switch to a different thread) -- Playwrights
+# SyncBase._sync() bruger et greenlet bundet til det OS-traad der oprindeligt
+# aabnede sync_playwright(), og close() SKAL derfor kaldes fra den SAMME
+# traad. Den reelle beskyttelse mod et haengende close()-kald er derfor
+# monitor.py's globale proces-watchdog (hang_guard.install_hard_watchdog) --
+# den rammer intet Playwright-objekt direkte, kun OS-primitiver
+# (threading.Timer + os.killpg/os._exit), saa den ER sikker at koere fra en
+# anden traad.
+
 BASE_URL = "https://reshopper.com"
 SEARCH_URL_TMPL = BASE_URL + "/da?q={query}"
 
@@ -233,6 +247,24 @@ def fetch(config: dict, dry_run: bool = False) -> list[dict]:
                     logger.exception("Reshopper: fejl under haandtering af '%s', springer over", term)
                     continue
 
+            # BEMAERK (haerdnings-forsoeg 2026-07-10): proevede oprindeligt at
+            # wrappe disse close()-kald i en baggrunds-traad + join(timeout)
+            # (se hang_guard.safe_close) for at give dem en timeout, siden
+            # Playwrights close()-metoder ikke selv tager et timeout-argument
+            # (bekraeftet mod installeret playwright==1.61.0 -- kun 'reason').
+            # Test (test_hang_diagnostics.py) afsloerede at dette AKTIVT
+            # OEDELAEGGER Playwrights sync-API: SyncBase._sync() bruger et
+            # greenlet bundet til det OS-traad der oprindeligt kaldte
+            # sync_playwright(), og et close()-kald fra en ANDEN traad fejler
+            # med 'greenlet.error: cannot switch to a different thread'.
+            # Playwrights sync-API er med andre ord IKKE traadsikker paa
+            # denne maade -- close() SKAL kaldes fra samme traad som resten af
+            # denne funktion. Den reelle beskyttelse mod et haengende close()-
+            # kald er derfor monitor.py's GLOBALE proces-watchdog
+            # (hang_guard.install_hard_watchdog) -- den rammer intet
+            # Playwright-objekt direkte (kun OS-primitiver: threading.Timer +
+            # os.killpg/os._exit), saa den ER sikker at koere fra en anden
+            # traad.
             context.close()
             browser.close()
     except Exception:
@@ -335,7 +367,10 @@ def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[
                             "Reshopper: bot-wall/challenge moedt under detalje-opslag, "
                             "springer RESTEN af detalje-opslagene over for denne koersel"
                         )
-                        context.close()
+                        # context.close() sker i finally-blokken nedenfor --
+                        # kaldte den ogsaa her tidligere, hvilket betoed et
+                        # (harmloest, men unoedvendigt) dobbelt close()-kald
+                        # for netop denne bot-wall-vej.
                         break
 
                     id_match = _ITEM_ID_RE.search(url)
@@ -378,6 +413,11 @@ def fetch_details(urls: list[str], config: dict, dry_run: bool = False) -> dict[
                 except Exception:
                     logger.exception("Reshopper: fejl under detalje-opslag for %s, springer over", url)
                 finally:
+                    # Se fetch()'s tilsvarende kommentar ovenfor: en traad-
+                    # baseret timeout-wrapper omkring close() blev testet og
+                    # forkastet (oedelaegger Playwrights sync-API paa tvaers
+                    # af traade) -- monitor.py's globale watchdog er den
+                    # reelle beskyttelse mod et haengende close()-kald her.
                     context.close()
 
             browser.close()
