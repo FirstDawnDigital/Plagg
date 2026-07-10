@@ -409,6 +409,33 @@ def main() -> int:
                 except Exception:
                     logger.warning("Turso: kunne ikke skrive kilde-fremdriftsstatus (%r) -- fortsaetter koerslen", text, exc_info=True)
 
+        def write_final_status(text: str) -> None:
+            """G13-FIX (UI-hul, ikke en proceshaengning): FOER denne rettelse
+            skrev KUN trigger_watcher.py den endelige status (efter at have
+            parset monitor.py's stdout NAAR den selv startede koerslen som
+            subprocess). Koeres monitor.py DIREKTE (test, ad-hoc, eller et
+            fremtidigt planlagt job udenom trigger_watcher.py) blev status
+            derfor staaende paa sidste fremdrifts-tekst ('Kører... (X ✓, Y …)')
+            for evigt -- UANSET om koerslen reelt lykkedes fint. Set fra en
+            bruger der kigger paa Kontrolpanelet/webappen er det umuligt at
+            skelne fra en reel haengning. monitor.py skriver derfor nu ALTID
+            sin egen endelige status her, saa den er selvbaerende uanset
+            hvordan den bliver kaldt -- trigger_watcher.py's finish_run()
+            overskriver den blot med samme/lignende tekst bagefter naar den
+            selv er den der startede koerslen, hvilket er harmloest."""
+            if args.dry_run:
+                return
+            if control_ws is not None:
+                try:
+                    sheets_output.set_status(control_ws, text)
+                except Exception:
+                    logger.warning("Sheets: kunne ikke skrive endelig status (%r)", text, exc_info=True)
+            if "turso" in targets and turso_url and turso_token:
+                try:
+                    turso_io.set_status(turso_url, turso_token, text)
+                except Exception:
+                    logger.warning("Turso: kunne ikke skrive endelig status (%r)", text, exc_info=True)
+
         try:
             write_progress_status()  # initial status foer nogen kilde er faerdig
         except Exception:
@@ -558,6 +585,7 @@ def main() -> int:
     # advarsel i stedet.
     if not sources_to_run:
         logger.warning("Ingen kilder blev konfigureret til at koere denne gang -- springer output-skrivning over")
+        write_final_status("Fejlede: ingen kilder konfigureret i config.yaml")
     elif not any_source_succeeded:
         logger.warning(
             "ALLE konfigurerede kilder (%s) fejlede denne koersel (0 lykkedes) -- springer output-skrivning til "
@@ -565,6 +593,7 @@ def main() -> int:
             "Se ovenstaaende exception(s) for detaljer.",
             ", ".join(sources_to_run),
         )
+        write_final_status(f"Fejlede kl. {now_str} -- alle kilder ({', '.join(sources_to_run)}) fejlede, se monitor.log")
     elif args.dry_run:
         logger.info("--dry-run: skriver ikke til Sheets/Turso/CSV-fallback")
     else:
@@ -595,6 +624,12 @@ def main() -> int:
                     logger.exception("Turso: kunne ikke skrive resultater (Sheets-sporet ovenfor er upaavirket af dette)")
             else:
                 logger.warning("output.targets: ukendt maal %r, springer over", target)
+
+        # G13-FIX: skriv den endelige "Færdig"-status HERFRA (se
+        # write_final_status()'s docstring) -- IKKE kun via
+        # trigger_watcher.py's efterfoelgende stdout-parsing, som ikke koerer
+        # naar monitor.py kaldes direkte/ad-hoc.
+        write_final_status(f"Færdig kl. {now_str} ({len(all_matches)} matches, {len(all_bundles)} bundles)")
 
     watchdog.cancel()
     return 0

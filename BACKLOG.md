@@ -30,7 +30,7 @@ G3    Beskedudkast + reservation        WSJF 2.0      TODO
 
 Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
 G8 (Sellpy-kilde), G9 (Vinted-kilde), J4-J7 (kritikrunde 2),
-G10-G12 (hastighedsoptimering + hængnings-hærdning), + bundle-definition
+G10-G13 (hastighedsoptimering + hængnings-hærdning + status-fix), + bundle-definition
 strammet + mobil-layout-fix.
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
@@ -91,6 +91,22 @@ ville altså ikke have givet nogen målbar gevinst.
   sync-API (`greenlet.error: cannot switch to a different thread`) --
   droppet igen, Playwright-objekter håndteres derfor fortsat direkte/
   synkront, med den globale proces-watchdog som den reelle beskyttelse.
+- **G13 (UI-hul fundet 2026-07-10, IKKE en proceshaengning):** Esben
+  observerede status fastlåst på "Kører... (DBA …, Reshopper …, Sellpy
+  ✓, Vinted ✓)" i over halvanden time. Undersøgt: INGEN `monitor.py`-
+  proces kørte -- det var en efterladt status fra en tidligere afbrudt
+  testkørsel, ikke en hængning. Rodårsag: kun `trigger_watcher.py`
+  skrev tidligere en endelig "Færdig"-status (ved at parse `monitor.py`s
+  stdout EFTER at have startet den som subprocess) -- kørte man
+  `monitor.py` DIREKTE (test, eller et fremtidigt planlagt job udenom
+  trigger_watcher), blev status derfor stående på sidste fremdrifts-
+  tekst for evigt, uanset om kørslen reelt lykkedes. Rettet:
+  `monitor.py` skriver nu ALTID sin egen endelige status
+  (`write_final_status()`) ved afslutning -- succes, alle kilder
+  fejlede, eller ingen kilder konfigureret -- uafhængigt af hvordan den
+  bliver kaldt. Bekræftet ved en rigtig kørsel: status gik korrekt fra
+  "Kører..." til "Færdig kl. 10-07-2026 21:40 (80 matches, 7 bundles)"
+  i både Sheets og Turso, skrevet af `monitor.py` selv.
 
 **G9 leveret (2026-07-10):** `sources/vinted.py` -- anonym cookie-priming
 (`GET vinted.dk/` sætter `anon_id`/`access_token_web`) + `GET
