@@ -22,16 +22,81 @@ bundles) -- opdateres først med FRISK data når Esben aktivt sætter
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
-G2    Notifikationer (opsummering)      WSJF 4.3      TODO
+G14   Vinted-fix: priming-retry+badges  Size 3        NÆSTE
+G15   Størrelse: eksakt/op, aldrig ned  Size 2        TODO
+G6    Stand-normalisering (m. punkt 3)  Size 4-5      TODO
+G16   Vinted land + polsk-nedprioritet  Size 6-7      TODO (afh. profilside)
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
-G6    Stand-baseret filtrering/nedton   WSJF ?        TODO
-G3    Beskedudkast + reservation        WSJF 2.0      TODO
+G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
+G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
 ```
 
 Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
 G8 (Sellpy-kilde), G9 (Vinted-kilde), J4-J7 (kritikrunde 2),
 G10-G13 (hastighedsoptimering + hængnings-hærdning + status-fix), + bundle-definition
 strammet + mobil-layout-fix.
+
+## Refinering (Opus, 2026-07-10) — Esbens 6 nye punkter
+
+**G14 (NÆSTE) — Vinted-fix.** Punkt 1 ("Vinted vises ikke") viste sig
+IKKE at være en data-bug: Turso indeholdt 28 Vinted-matches (flest af
+alle kilder) da det blev undersøgt. Reelle årsager: (a) Vinteds
+cookie-priming (`_prime_session()` i `sources/vinted.py`) rammer
+intermitterende en DataDome-403 -- 2 af 4 seneste rigtige kørsler fik 0
+Vinted-annoncer, og fordi generations-swap OVERSKRIVER alt pr. kørsel,
+forsvinder Vinted da HELT fra det publicerede run. Esben har sandsynligvis
+kigget lige efter et 403-run. (b) Kosmetisk: `sourceBadgeClass()` i
+`docs/index.html` har kun farvede badges for reshopper/dba -- vinted OG
+sellpy falder til grå `badge-source`, lette at overse. **Fix:** (a)
+retry priming 2-3× med backoff (+ evt. UA-rotation) før opgivelse; (b)
+tilføj `badge-vinted`/`badge-sellpy` CSS+grene. Size 3 samlet.
+
+**G15 — Størrelse: eksakt eller næste OP, aldrig mindre.** Punkt 2. I dag
+giver `matching._size_rank()` "nær" ved BEGGE nabostørrelser (104 → både
+98 og 110). Esben vil: eksakt = bedst, næste størrelse OP (104→110) =
+acceptabelt nær-match, MINDRE (104→98) = matcher ALDRIG (barnet vokser).
+**Teknisk:** erstat `_neighbor_sizes()`-brugen i `_size_rank()` med kun
+`SIZE_LADDER[idx+1]`. Kant-cases: tom ønske-størrelse skal STADIG →
+"eksakt" (G7 uændret); Sellpy/Vinted-intervalstørrelser ("98/104")
+matcher i dag hverken -- overvej at parse første token. Size 2, ingen
+afhængigheder.
+
+**G6 (opdateret — punkt 3 slået sammen hertil) — Stand-normalisering.**
+Punkt 3 ER en fuld specifikation af det gamle G6. Hver platform angiver
+stand FORSKELLIGT (Reshopper "Næsten som ny"/"God, men brugt"/"Defekt,
+kan laves"; Sellpy "Nyt/Meget god/God/Acceptabelt"; Vinted "Ny med
+prismærker/.../Tilfredsstillende"; DBA fritekst + CONDITION_MAP-fallback).
+**Design:** 5-trins normaliseret skala (ny > næsten_ny > god > brugt >
+defekt) med mapping-tabel pr. kilde (nyt `stand_map`-modul eller i
+`matching.py`); ønskets `stand`-fritekst mappes til en MINIMUMS-tærskel;
+annoncer under tærsklen filtreres/nedtones. Genbrug
+`sheets_output.BAD_STAND_LABELS`-mønstret til visning. Ingen skema-
+ændring strengt nødvendig (kan beregnes on-the-fly), men en
+`stand_norm`-kolonne letter visning. Size 4-5.
+
+**G16 — Vinted land + polsk-nedprioritering (punkt 4+5 slået sammen).**
+BEKRÆFTET LIVE: Vinteds anonyme catalog-hit indeholder INTET land
+(`user`-objektet har kun business/id/login/photo/profile_url; ingen
+city/country nogen steder; `/api/v2/items/<id>` 404'er uden login).
+**Esben har besluttet (2026-07-10) at bygge det alligevel** via opslag
+af hver sælgers `profile_url`-HTML (1 ekstra kald pr. Vinted-kandidat mod
+en DataDome-beskyttet side). Punkt 5 (nedprioritér polske sælgere:
+dyr fragt + hyppig parfumelugt) er HÅRDT afhængig af dette og bygges
+sammen med det. **Teknisk:** (a) `sources/vinted.py` henter sælgers
+profil-HTML og udtrækker land (skånsom kadence, bot-wall-håndtering som
+resten); (b) ny DB-kolonne `seller_country` + Turso-skemafelt + visning
+(land-flag/tekst pr. Vinted-match i webapp/Sheets); (c) soft
+nedrangering i `matching.match_all()`-sort for polske sælgere + synlig
+advarsel (parfumelugt/dyr fragt), IKKE hård eksklusion. Size 6-7.
+**Reel risiko (ærligt flag fra spike):** usikkert om profilside-opslaget
+holder stabilt i drift uden at blive DataDome-blokeret -- byg med tidlig
+validering af at det faktisk virker før resten bygges ovenpå.
+
+**Prioriterings-begrundelse:** G14+G15 er små, høj-værdi fixes med nul
+afhængigheder (gøres først). G6 (stand) er den tunge, veldefinerede
+feature. G16 er størst + mest usikker (bot-risiko) -- placeret efter de
+sikre gevinster, men foran G4/G2/G3 fordi Esben aktivt har prioriteret
+det. G2/G3 forbliver gated på konens faktiske brugsmønster.
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 
