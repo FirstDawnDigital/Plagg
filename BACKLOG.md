@@ -22,15 +22,38 @@ bundles) -- opdateres først med FRISK data når Esben aktivt sætter
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
-G8    Sellpy som match-kilde            Size 3        BYGGES
-G9    Vinted som match-kilde            Size 4        TODO (efter G8)
+G9    Vinted som match-kilde            Size 4        TODO (spike klar)
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G6    Stand-baseret filtrering/nedton   WSJF ?        TODO
 G3    Beskedudkast + reservation        WSJF 2.0      TODO
-G7    Størrelse valgfri (børneting)     -             DONE (2026-07-10)
-G5    Webapp med samlet UI              WSJF 1.1      LIVE, se G5-status
 ```
+
+Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
+G8 (Sellpy-kilde), + bundle-definition strammet + mobil-layout-fix.
+
+**G8 leveret (2026-07-10):** `sources/sellpy.py` bygget efter samme
+to-fase-kontrakt som Reshopper/DBA, men `fetch_details()` er no-op (alt
+ligger i Algolia-hittet). Ét offentligt Algolia-kald pr. søgeterm, ingen
+login/bot-wall. Felter: `price_DK.amount` (øre→kr), `metadata.brand/
+size/condition/type`, `isOnShelf`-filter, item-URL `sellpy.dk/item/
+<objectID>`. Cm-størrelse parses via regex `CM-(\d+)`, interval "98/104"
+→ "98" (første tal — kendt skævhed: undervurderer, gør 98/104 til "nær"
+i stedet for "eksakt"). Alt Sellpy-gods grupperes under én "Sellpy"-
+sælger (konsignation). Testet live: 37 rå hits → 4 kandidater → 4
+matches, medregnet i en rigtig kørsel (run_id=15).
+
+**Bundle-definition strammet (2026-07-10, Esben-ønske):** en bundle
+kræver nu 2+ items (`bundling.py` frafiltrerer enkelt-item-sælgere) —
+de er stadig i Matches. Retter at bundle-tallet øverst (status/TL;DR)
+ikke matchede faktisk antal bundles. Bekræftet: kørsel gav "13 matches,
+2 bundles" hvor tidligere samme data viste 5-6 "bundles".
+
+**Mobil-layout-fix (2026-07-10):** webappens ønskeseddel-formular
+skubbede på smalle skærme "Slet"-knappen ud over kanten (input's
+indbyggede min-bredde). Rettet med `min-width:0` på grid-celler/input +
+`overflow-x:hidden` sikkerhedsnet. Bekræftet på 360px viewport: ingen
+vandret overflow, knap inden for skærmen.
 
 **G7 leveret (2026-07-10):** størrelse er ikke længere påkrævet.
 `matching._size_rank()` returnerer "eksakt" ved tom ønske-størrelse (så
