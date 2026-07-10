@@ -1,0 +1,617 @@
+# BACKLOG — Personal Shopper (branch: Brugt børnetøj / Reshopper)
+
+> Fastbredde-tabeller i kodeblokke (ikke markdown-pipe-tabeller) så filen kan
+> monitoreres med `cat`/`watch` i en smal tmux-pane uden at ombrydes grimt.
+> Hold linjer under ~70 tegn ved redigering. WSJF = CoD / Size, CoD = BV+TC+RR
+> (hver 1–10). Fuld kontekst: se [personal-shopper-brief.md](../personal-shopper-brief.md)
+
+**Live demo/dashboard:** https://docs.google.com/spreadsheets/d/1EjCrvQmHcTz6MAhSYhQYPCfbB9rTKyscMJJ5ZtNPjO4
+(faner "Matches" og "Bundles", opdateret 2026-07-09 — H1-H5 leveret, se nedenfor)
+
+## Aktiv backlog (næste øverst)
+
+```
+ID    Emne                              Prioritet     Status
+----  --------------------------------  ------------  --------
+G2    Notifikationer (opsummering)      WSJF 4.3      TODO
+G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
+G3    Beskedudkast + reservation        WSJF 2.0      TODO
+G5    Webapp med samlet UI              WSJF 1.1      BYGGET, ikke aktiveret/pushet (se G5-status)
+```
+
+H-serien (fra demo-kritik) er leveret, se status-tabellen nedenfor. Den laa
+foran G-serien (brief §10-idéer) fordi den rettede selve MVP-outputtet og var
+billigere/mere presserende end at udvide scope. G-serien er kun groft scoret;
+re-scores naar vi kender faktisk brugsmønster over tid.
+
+## Udestående (2026-07-09) — til fælles planlægning
+
+```
+Emne                                   Type          Ejer
+--------------------------------------  ------------  ------------
+G5: git push til GitHub + aktivér     Beslutning    Esben
+  som daglig dashboard (config flip)
+G2 -- notifikationer                   Kvalificering Esbens kone
+G3 -- beskedudkast/reservation         Kvalificering Esbens kone
+G4 -- region-filtrering                Prioritering  Esben
+launchd: 2x-dagligt scheduled task     Drift         Esben (godkend)
+launchd: trigger_watcher.py            Drift         Esben (godkend)
+DBA-session (.dba_storage_state.json)  Kendt risiko  Esben (ved udløb)
+Git: committe + push til GitHub        Drift         Claude/Esben
+```
+
+- **G5-arkitektur:** største udestående — kræver et designvalg om
+  SQLite-skema for matches/bundles (se G5-status ovenfor) før noget kan
+  bygges. Godt udgangspunkt for dagens fælles planlægning.
+- **G2/G3:** bevidst ikke bygget — begge kræver at Esbens kone har brugt
+  systemet et stykke tid først, så kvalificeringen er baseret på reel
+  brug, ikke gæt.
+- **G4:** ikke afvist, bare ikke prioriteret af Esben endnu.
+- **launchd (begge):** dokumenteret i README.md, bevidst ikke installeret
+  — er en systemniveau-ændring der kræver eksplicit godkendelse. Uden
+  dem overlever hverken det 2x-dagligt scrape eller Kør nu-trigger'en en
+  genstart/session-lukning af Mac'en.
+- **DBA-session:** ingen automatisk fornyelse i MVP (bevidst, se G1-fund)
+  — når den udløber, stopper `sources/dba.py` gracefully og logger en
+  fejl, ikke en crash, men kilden leverer 0 resultater indtil Esben
+  gentager manuel-login-trinnet.
+- **Git:** lokalt repo er initialiseret (`git init` kørt 2026-07-09 i
+  forbindelse med at validere `.gitignore`) men INGEN commits/push er
+  lavet endnu — hele kodebasen mangler stadig at komme op på
+  `FirstDawnDigital/Plagg`.
+
+### G5-status (2026-07-09): forudsætninger klar, arkitektur ikke lagt endnu
+
+Besluttet: hostet webapp med Turso + Cloudflare Worker + GitHub Pages,
+samme mønster som ejendompython-arkivets LIVE opsætning (ikke den
+discontinued Render-backend).
+
+**Blokade løst:** `turso auth login`/`wrangler login`/interaktiv OAuth
+virker ikke i dette miljø (browser-callback kan ikke fuldføres her,
+samme rodårsag som at et headful Playwright-vindue ikke er synligt for
+Esben). Løsning fundet: `gh` bruger en device-code-flow der IKKE kræver
+lokal browser-callback og virker fint; Turso/Cloudflare bruger i stedet
+rene API-tokens (ingen OAuth-session nødvendig).
+
+**Klar til brug (2026-07-09):**
+- GitHub: repo oprettet, `FirstDawnDigital/Plagg` (privat). Lokalt
+  `git init` kørt i `personal-shopper/` -- IKKE committet/pushet endnu.
+- Turso: database `plagg` findes (Esben oprettede den selv), URL +
+  access-token ligger i `secrets.env` (IKKE i git, se `.gitignore`).
+- Cloudflare: API-token + korrekt Account ID (`6b3cb45c05b6533cc0d1d644b8924df6`,
+  hentet automatisk via `wrangler whoami` med tokenet -- den værdi
+  Esben først satte ind var fejlagtigt hans e-mail) ligger i `secrets.env`.
+
+**Arkitektur nu designet og godkendt (2026-07-09):** fuld plan i
+`/Users/server/.claude/plans/tidy-dreaming-liskov.md` -- Turso-skema
+(wishlist/matches/bundles/control med generations-swap i stedet for
+DELETE+INSERT), ny fil `turso_io.py` (spejler `sheets_output.py`s rolle),
+Cloudflare Worker med 7 X-API-Key-beskyttede endpoints, statisk vanilla-JS
+frontend, GitHub Actions-workflow. **Bindende:** Sheets-sporet forbliver
+100% intakt og kørende sideløbende under HELE byggeprocessen -- kun et
+eksplicit valg af Esben i `config.yaml` (`output.targets`/`trigger.source`)
+kan nogensinde slå det fra. Byggerækkefølge: (1) `turso_io.py` isoleret,
+(2) Cloudflare Worker, (3) frontend testet lokalt FØR push, (4) dual-write
+wiring af monitor.py/trigger_watcher.py sidst.
+
+**Fase 1 leveret (2026-07-09):** `turso_io.py` bygget og testet direkte mod
+den ægte `plagg`-database. `ensure_schema()` bekræftet (4 tabeller +
+control-singleton oprettet). Generations-swap bekræftet ved 2 på-hinanden-
+følgende `write_matches_and_bundles()`-kald med forskelligt testdata: 2.
+kørsels data erstattede 1. kørsels fuldstændigt (`SELECT DISTINCT run_id`
+gav kun den nyeste), ingen sammenblanding. Kør nu-flow
+(`read_run_now`/`set_status`/`finish_run`) testet og bekræftet. Testdata
+ryddet op efter -- databasen står jomfruelig tilbage. Ikke testet: reel
+samtidighed (to overlappende write-kald) -- kun sekventielt.
+
+**Fase 2 leveret (2026-07-09):** `cloudflare/worker.js`+`wrangler.toml`
+bygget, deployet ikke-interaktivt (API-token, intet `wrangler login`) til
+**https://plagg-api.proqual.workers.dev**. Secrets sat (`TURSO_URL`,
+`TURSO_AUTH_TOKEN`, `API_KEY=klematis`). Alle 7 endpoints bekræftet med
+curl: wishlist-CRUD (opret→list→slet→bekræft væk), matches/bundles (tom
+liste, korrekt), status/trigger (run_now 0→1 bekræftet), og en EKSPLICIT
+401 uden `X-API-Key`-header. Kendt detalje: ~10-15 sek. propagerings-
+forsinkelse observeret lige efter `wrangler secret put`, ingen retry-logik
+tilføjet (ikke nødvendigt post-deploy). Test-triggeren (`run_now=1`)
+nulstillet af mig bagefter for at holde databasen ren før Fase 4.
+
+**Fase 3 leveret (2026-07-09):** `docs/index.html` bygget (vanilla JS, ingen
+build-step) og testet med Playwright i mobil viewport (390×844) mod den
+LIVE Worker. Password-flow, wishlist-CRUD, og Kør nu+statuspolling alle
+bekræftet virkende. Kritik-runde ("Esbens kone"-persona, samme metode som
+H-serien) fandt 5 problemer, 4+1 rettet med det samme:
+- Tomt/ugyldigt maks-pris-felt endte tidligere stille som "ingen
+  prisgrænse" -- undersøgt og bekræftet at `maks_pris=0` reelt betyder
+  "udelukker ALT" i `matching.py` (`price > maks_pris`-filter), ikke
+  "ingen grænse". Feltet er nu påkrævet med synlig fejl.
+- "Kør nu" viste kun en misvisende 3-sekunders knap-deaktivering (ikke
+  reel status) -- tilføjet et vedvarende bekræftelsesbanner uafhængigt
+  af knappens animation, med 20s timeout-advarsel hvis ingen kørsel
+  reelt starter (relevant før Fase 4 er koblet til).
+- Brugerdefineret fejltekst for manglende felter blev aldrig vist,
+  fordi HTML5 `required`-native-validering blokerede submit først --
+  fjernet `required`, al validering går nu gennem app-koden.
+- Sletning af ønskeseddel-item manglede bekræftelse -- tilføjet
+  `confirm()`-dialog.
+- (Bonus) Slet-knappens tap-target forstørret til 44px min.
+IKKE pushet til GitHub endnu (bevidst, jf. planens byggerækkefølge --
+push kommer efter Fase 4).
+
+**Fase 4 leveret (2026-07-10):** `config.yaml` (nye additive `turso:`/
+`output:`-sektioner + `trigger.source`), `monitor.py` (Turso-skema
+bekræftes i samme try/except som Sheets, output-skrivning er nu en
+løkke over `output.targets` med Turso i sit eget try/except),
+`trigger_watcher.py` (backend-adapter `SheetsControlBackend`/
+`TursoControlBackend`, loop-logik uændret), `wishlist.py` (ny
+`source: "turso"`-gren, samme fallback-mønster som `"sheet"`).
+
+**Ærlig hændelse undervejs:** byggeagentens egen dual-write-testkørsel
+hang natten over (sidste log-linje kl. 00:24, ingen `monitor.py`-proces
+kørende ved tjek kl. 08:46, Turso stadig 100% upåvirket) -- formentlig et
+forbigående Reshopper/Playwright-netværksudsving, IKKE en kodefejl (koden
+blev læst igennem og matcher planen præcist). Jeg reproducerede og
+verificerede derfor Fase 4 SELV i forgrunden i stedet for at stole på
+agentens ubekræftede rapport:
+- **Regressionstest:** ikke eksplicit gen-kørt isoleret (implicit
+  bekræftet af dual-write-testen nedenfor, som også skriver til Sheets
+  uændret).
+- **Dual-write, kørsel 1:** `output.targets: ["sheet","turso"]`, rigtig
+  scraping (12 matches, 5 bundles) -- Sheets opdateret OG Turso
+  bekræftet via direkte SELECT (`matches`=12, `bundles`=5,
+  `current_run_id`=1, `last_tldr` matcher Sheets' TL;DR ordret).
+- **Dual-write, kørsel 2 (generations-swap over ægte data):** kørt igen
+  umiddelbart efter -- `current_run_id`=2, `SELECT DISTINCT run_id FROM
+  matches` gav KUN `{2}` (12 rækker, ikke 24) -- gen1 korrekt erstattet,
+  ikke akkumuleret.
+- **Trigger-backend (Turso):** `trigger.source: "turso"` midlertidigt
+  sat, `run_now=1` sat direkte i Turso, `python trigger_watcher.py
+  --once` kørt -- detekterede korrekt, kørte en fuld `monitor.py`-
+  kørsel (run_id=3), og nulstillede `run_now=0` +
+  `status="Færdig kl. 08:59 (12 matches, 5 bundles)"` i Turso.
+- **Config.yaml sat tilbage** til sikre defaults (`output.targets:
+  ["sheet"]`, `trigger.source: "sheet"`, `wishlist.source: "sheet"`
+  uændret) efter test -- bekræftet ved grep.
+
+**Sikkerhedsfund (rettet med det samme):** en efterladt fil `.env.save`
+med et rigtigt Cloudflare API-token i klartekst lå i personal-shopper/,
+IKKE dækket af `.gitignore` (kun `secrets.env` var). Formentlig et
+biprodukt fra Fase 2's `wrangler secret put`-arbejde. Slettet øjeblikkeligt
+ved opdagelse, før noget nåede i nærheden af et git-commit.
+
+**Teknisk fejl-gennemgang efter Fase 4 (2026-07-10)** — uafhængig code
+review (ikke UX-kritik, ren korrekthed) fandt 5 problemer, 4 rettet med
+det samme:
+- **KRITISK:** `monitor.py` havde Sheets- og Turso-opsætning i SAMME
+  try/except -- en Sheets-fejl (fx forkert credentials-sti) sprang
+  derfor Turso-load'et helt over pga. Pythons try/except-semantik,
+  selvom de to er uafhængige. Rettet: to separate try/except-blokke.
+- **KRITISK:** Race condition i `turso_io.py`s generations-swap kunne
+  slette en ANDEN, samtidig kørsels data -- "best-effort oprydning"
+  slettede alt der ikke matchede det globalt nyeste `current_run_id`,
+  hvilket kunne ramme en hurtigere sideløbende kørsels allerede-
+  indsatte-men-endnu-ikke-publicerede rækker. Rettet: hver skriver
+  rydder nu KUN op i den specifikke generation den selv erstattede
+  (`superseded_run_id`, læst FØR eget run_id allokeres), aldrig et
+  bredt "alt andet end nyeste"-slet. Reproduceret og bekræftet rettet
+  med den præcise overlap-rækkefølge fra reviewet.
+- **MODERAT:** `worker.js` validerede ikke `maks_pris` server-side --
+  ugyldig/negativ værdi endte som en rå, lækket Turso-500-fejl. Rettet:
+  klar 400-validering (positivt tal, ikke-tomme type/størrelse) FØR
+  Turso-kaldet.
+- **LAV men vigtigt:** hvis ALLE kilder fejlede (fx total netværksfejl),
+  saa generations-swap identisk ud som "markedet har reelt 0 nye
+  matches" og slettede al eksisterende data. Rettet: `run_source()`
+  returnerer nu ogsaa en success-status; hvis ALLE kilder fejlede
+  springes HELE output-skrivningen (Sheets+Turso+CSV) over for den
+  koersel, med en tydelig advarsel i stedet.
+- (Ikke rettet, lav prioritet:) `DELETE /api/wishlist/:id` med et
+  ikke-numerisk ID giver en generisk 404 i stedet for en klar 400 --
+  ingen sikkerhedsrisiko (SQL-injection udelukket ved test), kun en
+  mindre tydelig fejlbesked.
+
+Alle 4 rettelser testet konkret mod den ægte Turso-database og live
+Worker (inkl. en direkte reproduktion af race-scenariet og en monkeypatch-
+test af "alle kilder fejler"-stien via en rigtig `monitor.main()`-kørsel).
+`config.yaml` bekræftet tilbage til sikre defaults efter alt testarbejde.
+
+**G5 er nu funktionelt komplet OG teknisk gennemgået (Fase 1-4 + 2
+kritikrunder), men IKKE pushet til GitHub endnu og IKKE aktiveret som
+Esbens daglige dashboard** -- det kræver et bevidst valg af Esben (flip
+`output.targets`/`trigger.source`/`wishlist.source` til `"turso"`, og en
+eksplicit beslutning om at pushe koden til `FirstDawnDigital/Plagg`, se
+"Udestående" -- git push er en synlig, offentlig handling jeg ikke
+foretager uden Esbens direkte ok).
+
+### G1-fund (2026-07-09): login løser bundling-problemet
+
+F1-lignende spike viste at DBA's sælgernavn/-profil er login-låst for
+anonyme klienter, og at Sellpy er en konsignationsmodel (fælles fragt på
+tværs af HELE markedet, ikke pr. sælger) — se tidligere fund. Esben
+besluttede at gå videre med **login via en NY, dedikeret DBA-konto**
+(ikke en privat/rigtig konto — isolerer risikoen hvis kontoen skulle
+blive spærret), oprettet med `firstdawndigital@gmail.com`.
+
+**Vigtigt delfund:** DBA/Vend-loginet har en Google reCAPTCHA på selve
+login-siden — kan ikke løses af automatiseret Playwright (bevidst
+undladt, det ville være automatiseret detektionsomgåelse). Løsning:
+Esben loggede ind MANUELT i sin egen browser (ingen automatisering),
+eksporterede cookies via browser-udvidelsen "Cookie-Editor", og delte
+JSON'en. Cookies blev konverteret til Playwright `storage_state`-format
+og gemt i `.dba_storage_state.json` (IKKE i git, se `.gitignore`).
+
+**Bekræftet virkende (2026-07-09, screenshot-verificeret):** en
+Playwright-context der loader `.dba_storage_state.json` viser login-only
+navigation ("Beskeder", "Min DBA") OG en tidligere låst sælgersektion på
+en annonceside — sælgernavn ("Nicoline A"), MitID-validering, "På DBA
+siden 2011", rating. Bundling pr. sælger er dermed teknisk muligt.
+
+**URL-mønstre fundet:** søgning `https://www.dba.dk/recommerce/forsale/search?q=<term>`,
+annonceside `https://www.dba.dk/recommerce/forsale/item/<id>` (IKKE
+`/item/<id>` alene, som en tidligere antagelse fejlagtigt brugte).
+JSON-LD (`Product`/`Offer`) på annoncesiden har pris/mærke/stand/størrelse
+men INTET sælgerfelt — sælgernavn skal hentes fra det renderede DOM
+(kræver fuld JS-rendering, ikke kun `domcontentloaded`+kort sleep — se
+byggeagentens research for korrekt selector/ventestrategi).
+
+**Session-vedligehold (kendt begrænsning):** cookien er en engangs-eksport
+fra Esbens login 2026-07-09 — udløber efter ukendt tid (typisk uger til
+måneder for denne slags sessions). Når den udløber, skal Esben gentage
+manuel-login-+-cookie-export-trinnet. Ingen automatisk fornyelse i MVP.
+
+### Status på G-serien
+
+```
+ID    Emne                              Dato        Status
+----  --------------------------------  ----------  --------
+G1    DBA som ny kilde (MED bundling)   2026-07-09  DONE
+```
+
+### G1-levering (2026-07-09): `sources/dba.py` bygget og testet mod live data
+
+Ny kilde `sources/dba.py` følger PRÆCIS samme to-fase-kontrakt som
+`sources/reshopper.py` (`fetch()` → kort-niveau via `search?q=<term>`,
+`matching.precheck()` filtrerer billigt, `fetch_details()` besøger KUN
+kandidater) — `monitor.py`/`matching.py`/`bundling.py`/`sheets_output.py`
+genbruges UÆNDREDE bortset fra de to rettelser nedenfor. Wiret ind i
+`monitor.py` via `SOURCE_MODULES = {"reshopper": ..., "dba": ...}`; den
+gamle Reshopper-specifikke `run_reshopper()` er omdøbt/generaliseret til
+`run_source(source_name, source_module, ...)` da fase 1/2-logikken var
+identisk på tværs af kilder.
+
+**Uventet DOM-fund (afgørende for hele designet):** DBA er bygget som en
+Schibsted/Vend "Podium"-mikrofrontend med webkomponenter i **shadow DOM**
+(fx `<finn-topbar>`). Både `page.content()` og
+`document.body.innerText`/`textContent` gav uventet TOMT resultat på
+annoncesidens sælgersektion, selvom et screenshot viste indholdet tydeligt
+— fordi hverken Playwrights `page.content()` (kun light DOM) eller native
+`document.querySelectorAll` (piercer ikke shadow-root) når ind i et
+shadow-root. Kun Playwrights EGNE `locator()`/`query_selector_all()`-kald
+(som piercer shadow-DOM som standard for CSS-selectors) eller en
+JS-`evaluate` der eksplicit traverserer `element.shadowRoot` virker.
+
+**Bedre fund end DOM-scanning:** annoncesiden indeholder et `<script>`
+(inde i et shadow-root) med `window.__staticRouterHydrationData =
+JSON.parse("...")` — en SERVER-renderet JSON-blob med sælgernavn
+(`profileData.profile.identity.name`), en STABIL numerisk sælger-ID
+(`itemData.meta.ownerId` — mere pålidelig end Reshoppers best-effort
+regex-udtræk), fragttekst ("Fragt fra 29,99 kr. + ...") og en præcis
+dansk stand-label via `extras`-listen (`id="condition"`, label "Stand").
+Dette er den PRIMÆRE kilde til sælger/fragt/stand; JSON-LD
+(`application/ld+json`, samme schema.org-mønster som Reshopper) bruges
+som fallback for pris/mærke/stand hvis hydration-JSON'en fejler at parse
+(uofficiel struktur, kan brække ved et DBA-redeploy — graceful
+degradation til "ukendt"/`None`, aldrig en crash).
+
+**Bundling-fix (grundlæggende korrekthed, ikke kun DBA-specifik):**
+`bundling.py:_seller_key()` grupperede FØR denne ændring KUN på
+sælger-ID/-navn, uden kilde — en Reshopper-sælger og en DBA-sælger med
+samme navn (eller ved et sammentræf samme numeriske ID) ville fejlagtigt
+blive slået sammen til én bundle. Nøglen præfikses nu altid med kilden
+(`f"{source}|id:{seller_id}"`). `sheets_output.py` fik en ny "Kilde"-
+kolonne i både Matches- og Bundles-fanerne (og CSV-fallback) af samme
+grund — med to platforme side om side er det ikke længere indlysende
+hvilken platform et opslag/en bundle stammer fra.
+
+**Session-håndtering:** `sources/dba.py` forsøger ALDRIG selv at logge
+ind, løse CAPTCHA eller forny `.dba_storage_state.json`. Et
+`_session_looks_logged_in()`-tjek (Playwright-locator for
+`a[href*="/my-page"], a[href*="/messages"]` — bevidst IKKE
+`page.content()`, som ikke ser ind i shadow-DOM'en de linkene faktisk
+ligger i) kører én gang pr. kørsel; ser sessionen udløbet ud, stopper
+kilden og logger en fejl der eksplicit beder om at eskalere til Esben.
+
+**Bekræftet ved LIVE kørsler 2026-07-09 (ikke kun `--dry-run`):**
+- `python monitor.py --dry-run --source dba` mod ønskesedlens 2 test-items
+  (Birkholm leggings 104, Zara bukser 104): 20 rå annoncer hentet (10 pr.
+  søgeterm), 0 kandidater efter `precheck()` — reelt (ægte markedsdata
+  lige nu har ingen Birkholm-leggings eller Zara-bukser i str. 104 blandt
+  DBA's top-10 søgeresultater for de PRÆCISE ønskeseddel-afledte termer),
+  ikke en fejl. Samme kendte "kun ~10 kort, ingen bekræftet 'vis flere'"-
+  begrænsning som Reshopper (se F2-fund) gør sig gældende for DBA.
+- For at bevise at hele kæden (fetch_details → matching → bundling)
+  RENT FAKTISK virker mod ægte DBA-data, blev en bredere søgning
+  ("Zara bukser 104") brugt til manuelt at finde et ægte, levende DBA-
+  opslag der matcher testkriterierne: vare-ID 838456 →
+  "Bukser, Vinter, Zara", str. 104, 150 kr. `fetch_details()` +
+  `matching.match_item()` + `bundling.build_bundles()` kørt direkte mod
+  denne URL bekræftede: sælgernavn "Annette L", sælger-ID "1402936400"
+  (hydration-udtræk lykkedes), match_rank "nær match" (mærkefelt manglede
+  i denne annonces JSON-LD, faldt korrekt tilbage til nær-match via det
+  generiske mærke-spor), bundle med `shipping_is_assumed=True` (39 kr.
+  fallback, ingen fragt-tekst fundet for netop denne annonce) — al
+  graceful degradation opførte sig som designet.
+- Fuld produktionskørsel `python monitor.py` (begge kilder, IKKE
+  `--dry-run`, skriver til det rigtige Sheet): Reshopper gav 11 matches/
+  4 bundles, DBA gav 0 (samme top-10-søgeterm-begrænsning som ovenfor for
+  netop denne kørsels tidspunkt). Matches- og Bundles-fanerne blev
+  bekræftet at have den nye "Kilde"-kolonne med værdien "Reshopper"
+  korrekt udfyldt ved direkte genlæsning af arket via `gspread`.
+
+**Kendte usikkerheder/skrøbeligheder (ærligt flaget):**
+- Sælgernavn/-ID/fragt/stand afhænger af den udokumenterede
+  `__staticRouterHydrationData`-struktur — kan brække ved et DBA/Vend-
+  redeploy (samme risikoklasse som Reshoppers sælger-ID-udtræk).
+  Graceful fallback til JSON-LD/"ukendt" er på plads, men ikke testet
+  mod en fremtidig strukturændring (kan ikke være det, per definition).
+- Fragt-udtræk (`_parse_kr_amount` på hydration-JSON'ens
+  `shippingPrice.text`) er kun bekræftet på ÉN reel annonce med udfyldt
+  fragttekst ("Fragt fra 29,99 kr. + Tryg betaling 11 kr.") — ikke
+  bredt valideret mod annoncer uden Fiks færdig/andre fragtmodeller.
+- `max_results_per_term: 10` er samme antagelse som Reshopper (ingen
+  "vis flere"-trigger undersøgt for DBA) — betyder reelt at DBA-fund kan
+  mangle hvis et match ligger uden for de første 10 søgeresultater, som
+  set i denne kørsel.
+
+## Status på oprindelig MVP-build (alt leveret)
+
+```
+ID    Emne                              Dato        Status
+----  --------------------------------  ----------  --------
+F1    Reshopper dataadgang-spike        2026-07-08  DONE
+F2    Dataindsamling -> item-model      2026-07-09  DONE
+F3    Ønskeseddel + matching            2026-07-09  DONE
+F4    Bundling pr. sælger               2026-07-09  DONE
+F5    Output til dashboard-Sheet        2026-07-09  DONE (*, LIVE)
+F6    Scheduled task (2x/dag)           2026-07-09  DONE (**)
+F7    Validering mod 2 test-items       2026-07-09  DONE
+```
+(*, LIVE) Sheets-auto-oprettelse fejlede pga. servicekontoens manglende
+Drive-kvote — krævede ét manuelt trin (menneske opretter Sheet, deler det
+MED servicekontoen). Esben delte et Sheet og satte ID i `config.yaml`
+2026-07-09 — pipeline kørt og BEKRÆFTET at skrive live til "Matches"- og
+"Bundles"-faner (se link øverst i filen). CSV-fallback ikke længere i brug.
+(**) launchd-plist dokumenteret i README.md, bevidst ikke installeret.
+
+**Byggerækkefølge (afhængighedsstyret, ikke ren WSJF):** F1→F2→F3→F4→F5→F6→F7
+
+## Status på demo-kritik-rettelser (H-serien, alt leveret)
+
+```
+ID    Emne                              Dato        Status
+----  --------------------------------  ----------  --------
+H1    Bundle-links direkte i output     2026-07-09  DONE
+H2    TL;DR "hvad betaler sig nu"       2026-07-09  DONE
+H3    Nedton/flag defekte items         2026-07-09  DONE
+H4    Afklar dubletter i output         2026-07-09  DONE
+H5    Kr.-enhed + JA/NEJ-konsistens     2026-07-09  DONE
+I1    Trigger-fra-Sheet (kør nu)       2026-07-09  DONE
+```
+
+## Status på kritik-loop 2 (Kontrolpanel + ønskeseddel-flow)
+
+```
+ID    Emne                              Dato        Status
+----  --------------------------------  ----------  --------
+J1    Kortere poll + ventetids-hint     2026-07-09  DONE
+J2    Varsel ved sprunget ønske-række   2026-07-09  DONE
+J3    Visuel "kørsel i gang"-lås        2026-07-09  DONE
+```
+
+Rollespil mod det ægte ark (samme "travl kone"-persona som H-serien) fandt:
+op til 60 sek. stilhed efter klik uden feedback var den reelle risiko (hun
+ville tro klikket ikke registrerede) — **J1** sætter `poll_interval_s` 60→15
+og tilføjer et "kan tage op til 15 sek./typisk 1-3 min."-hint i Kontrolpanel-
+teksten og Status-beskeden. **J2:** en ønskeseddel-række med indhold men
+manglende Type/Størrelse (fx tastefejl) forsvandt tidligere stille — nu
+logges `SKIPPED_WISHLIST_ROWS=N` i `wishlist.py`, opfanget af
+`trigger_watcher.py` og tilføjet til Status som "OBS: N ønske sprunget
+over, tjek Ønskeseddel-fanen". Begge testet live: J2 bekræftet ved
+midlertidigt at tilføje en ugyldig raekke (Type="sweater", Størrelse tom) —
+gav korrekt `SKIPPED_WISHLIST_ROWS=1` og lod de 2 gyldige items passere
+uændret; raekken fjernet igen efter test.
+
+Et fjerde kritikpunkt (ingen visuel "kørsel i gang"-lås på selve checkboxen)
+blev efterfølgende også bygget: selvom et gen-klik under en kørsel er
+ufarligt (watcheren er synkron), manglede der en tydelig VISUEL indikation
+ud over Status-teksten alene. **J3:** `sheets_output.lock_control_row()`
+sætter en gul-orange baggrund (`CONTROL_RUNNING_BG`) på "Kør nu"- og
+Status-rækken (A2:D3), kaldt af `trigger_watcher.py` lige efter
+Status="Kører..." sættes. `finish_run()` nulstiller den samme baggrund til
+hvid (`CONTROL_NORMAL_BG`) igen, så laasen altid fjernes uanset succes/fejl
+— samme funktion der allerede nulstiller checkbox/Status/Sidst kørt.
+Testet ved at simulere start/slut direkte via `sheets_output`-funktionerne
+(uden at vente på en rigtig 2-3 min. kørsel) og læse cellernes
+`userEnteredFormat.backgroundColor` tilbage fra Sheets-API'en: under
+kørsel gav A2:D3 `{red:1, green:0.898, blue:0.6}` (matcher
+`CONTROL_RUNNING_BG`), efter `finish_run()` gav samme celler `{red:1,
+green:1, blue:1}` (hvid/normal) — og B2/B3/B4 var korrekt nulstillet.
+
+## Afklarede spørgsmål/beslutninger
+
+- **Google Sheets-adgang:** genbruger service account fra ejendompython-
+  arkivet: `ejendom-server@ejendomsystem-493221.iam.gserviceaccount.com`
+  (afklaret 2026-07-08).
+- **Scraping vs. robots.txt:** Reshoppers `robots.txt` spærrer eksplicit
+  generiske bots. Besluttet at bygge alligevel, lavfrekvent/skånsomt, samme
+  gråzone-tilgang som Blocket/Kleinanzeigen i PA SPEAKERS-arkivet (afklaret
+  2026-07-08).
+- **Brief §6-eksempel er unøjagtigt:** "4×20 kr + 45 kr fragt = 26 kr/stk"
+  går ikke matematisk op (giver 31,25 kr/stk) — bekræftet under test at
+  koden selv regner korrekt, det var brief-eksemplet der var upræcist.
+  Ret ved lejlighed i personal-shopper-brief.md, ikke i koden.
+
+## Scoring-detaljer (F-serie)
+
+```
+F1  Reshopper dataadgang-spike
+    BV 8  TC 8  RR 9  CoD 25  Size 2  WSJF 12.5
+F2  Dataindsamling → normaliseret item-model
+    BV 9  TC 7  RR 6  CoD 22  Size 6  WSJF 3.7
+    Size opjusteret 5→6 efter F1: client-renderet søgeflow + 429-håndtering.
+F3  Ønskeseddel-input + matching-logik
+    BV 9  TC 6  RR 4  CoD 19  Size 4  WSJF 4.75
+F4  Bundling-beregning pr. sælger
+    BV 10 TC 5  RR 3  CoD 18  Size 3  WSJF 6.0
+F5  Output til dashboard-Sheet
+    BV 7  TC 5  RR 2  CoD 14  Size 3  WSJF 4.7
+F6  Scheduled task (2x dagligt)
+    BV 5  TC 3  RR 2  CoD 10  Size 2  WSJF 5.0
+F7  Validering mod 2 test-items
+    BV 6  TC 6  RR 3  CoD 15  Size 2  WSJF 7.5
+```
+
+Begrundelse (kort): F1 højest da hele arkitekturen afhang af svaret (lavt
+Size = ren spike). F4 har højeste BV (selve fragt-økonomi-værdiforslaget),
+men kan først bygges når F3 leverer data at gruppere. F7 scorer højt
+isoleret, men giver kun mening som sidste led. Genbrug fra `CC ARCHIVE`
+(monitor.py, sources/*.py, db.py, sheets_exporter.py) sænkede Size markant
+på F2/F5/F6 — intet af det blev bygget fra bunden.
+
+## F1-fund (styrer resten af build)
+
+- Reshopper (`reshopper.com`) er en Next.js-SPA bag Vercels bot-management.
+  `curl`/simple HTTP 429'er med `x-vercel-mitigated: challenge`, men en
+  rigtig Playwright-Chromium fik 200 på forsiden. Intet API fundet.
+- `robots.txt`: `Disallow: /` for `User-Agent: *`, allow-lister kun
+  navngivne søgemaskine-bots — eksplicit "vil ikke scrapes"-signal.
+- Bot-wall-detektion tjekker **429 + `x-vercel-mitigated`** som primær-
+  signal, danske tekstmarkører som fallback.
+- Ved genbesøg under F2-build viste `?q=<term>`-URL'en (som F1 afviste)
+  sig rent faktisk at filtrere resultater — bekræftet empirisk ("birkholm"
+  → 2.256 varer, opdigtet ord → 0). F2 blev derfor bygget om direkte
+  navigation til denne URL, simplere end at simulere klik i søgefeltet.
+
+## Demo-kritik (2026-07-09) — detaljer bag H-serien
+
+Rollespil mod de rigtige CSV-fallback-filer fra F7-validering, i rollen som
+Esbens kone: travl, vil have et hurtigt "skal jeg handle nu?"-svar.
+
+- **H1:** Skal i dag krydsreferere `bundles_fallback.csv` mod
+  `matches_fallback.csv` for at finde et opslags link — to opslag pr. bundle.
+- **H2:** Intet samlet "handl nu"-signal øverst — skal selv regne ud at
+  Michelle A og Elisabeth O er de bundles der betaler sig.
+- **H3:** "Defekt, kan laves" (Nina S) stod visuelt lige med "Næsten som
+  ny" — bør flages tydeligt.
+- **H4:** To Michelle A-rækker med identisk pris/stand lignede ved første
+  øjekast en duplikat-bug (var reelt to forskellige opslag).
+- **H5:** Fragt-kolonne uden enhed ("35"), inkonsistent JA/nej-case.
+
+## Leverance-detaljer (MVP)
+
+**F2:** To-fase-design: `fetch()` henter kort-niveau-data via regex på
+`inner_text()` (robust mod Tailwind-churn), `matching.precheck()` filtrerer
+billigt FØR detalje-opslag, `fetch_details()` besøger kun kandidater og
+læser mærke/stand/sælger/fragt fra `application/ld+json` (schema.org).
+Testet 2026-07-09: 20 rå annoncer → 8 kandidater → 8/8 detalje-opslag OK.
+
+**F3:** To-tier ranking (eksakt/nær match), synonymliste for typer, nabo-
+størrelsesstige for EU-børnetøj. Ønskeseddel fra Sheet-fane ELLER lokal
+`data/wishlist.local.yaml` (de to officielle testposter). Maks-pris 150 kr.
+var ikke givet i briefen — sat af bygge-agenten som demo-grænse.
+
+**F4:** Testet mod live data: Michelle A (2× Birkholm leggings) og
+Elisabeth O (2× Zara bukser) — begge 17,50 kr./stk. besparelse ved
+bundling. Bekræfter kerneværdiforslaget på ægte markedsdata.
+
+**F5:** `client.create()` fejler forudsigeligt (403, 0 Drive-kvote på
+servicekontoen — Google-begrænsning, ikke kodefejl). Skrive-mekanikken
+(add_worksheet/update/format) er bekræftet mod et allerede delt ark.
+Falder automatisk tilbage til CSV indtil Sheet-ID er konfigureret.
+
+**F6:** launchd-plist dokumenteret (kl. 8 og 20), bevidst ikke installeret.
+
+**F7:** Kørt 2026-07-09 mod ægte Reshopper-data (ikke kun `--dry-run`):
+8 matches, 6 sælger-grupper, korrekt eksakt/nær-match-ranking, `seen.db`-
+dedup bekræftet stabil på tværs af to kørsler.
+
+**Kendte begrænsninger:** kun ~10 kort/søgeterm (ingen bekræftet "vis
+flere"), ingen "nyeste først"-sortering, sælger-ID/fragt er best-effort,
+ingen aktiv/solgt-tracking.
+
+**H1:** Bundles-fanen har nu dynamiske "Opslag N"-kolonner (én pr. item i
+den størst observerede bundle denne kørsel), hver med en klikbar
+HYPERLINK-formel direkte til opslaget. CSV-fallback faar samme kolonner
+med rå URL'er (CSV kan ikke rumme formler). Bekræftet ved at læse
+Bundles-fanen tilbage med value_render_option="FORMULA": Michelle A-
+rækken indeholder to virkende =HYPERLINK(...)-formler til de to Birkholm-
+leggings-opslag, ingen opslag i Matches-fanen nødvendigt.
+
+**H2:** Bundles-fanen (og CSV'en) starter nu med en dynamisk TL;DR-linje
+(sammenlagt/mergeet A1:sidste kolonne), genereret af
+`sheets_output.build_tldr_line()` ud fra hvilke bundles der reelt har
+`bundle_worth_it=True` denne kørsel. Bekræftet: kørsel mod ægte data gav
+"🟢 2 bundle(s) betaler sig lige nu: Michelle A, Elisabeth O" i række 1,
+header rykket til række 2, freeze udvidet til 2 rækker.
+
+**H3:** Matches-fanen prefixer nu "⚠️ " foran stand-labels i
+`BAD_STAND_LABELS` (pt. kun "Defekt, kan laves" -- de øvrige kendte
+labels fra sources/reshopper.py er reelt fint brugbar stand). Rækken faar
+desuden en lyserød baggrundsfarve via `ws.batch_format()`. Bekræftet ved
+at læse cellens `userEnteredFormat.backgroundColor` tilbage fra Sheets-
+API'en for Nina S' "Defekt, kan laves"-række: {red 0.976, green 0.847,
+blue 0.820} -- matcher `STAND_WARNING_BG` præcist.
+
+**H4:** To uafhængige tiltag: (1) Matches-fanen fik en ny "Opslag-ID"-
+kolonne med de sidste 6 tegn af item-ID'et (fx "…53e1d4" vs. "…26d861"
+for de to Michelle A-rækker). (2) Bundles' "Varer i bundle"-tekst
+nummererer nu ens-udseende titler inden for samme bundle ("Birkholm
+Leggings #1"/"#2"). Begge bekræftet i det faktiske Sheets-output.
+
+**H5:** Fragt vises nu som fx "35 kr." (`sheets_output._format_kr()`) i
+både Matches' og Bundles' fragt-kolonner, i stedet for et enhedsløst
+tal. "Bundling betaler sig" viser konsekvent "JA"/"NEJ" (fjernet den
+tidligere blandede "nej (kun 1 item)"/"JA"-case) -- "Lokal
+afhentning-bonus" er samtidig ensrettet til samme JA/NEJ-mønster i
+stedet for tom celle/tekst-blanding, for konsistensens skyld.
+
+**I1:** Ny fane "Kontrolpanel" (`sheets_output.ensure_control_tab()`) med en
+RIGTIG Sheets-checkbox i B2 -- gspread 6.1.2/6.2.1 (installeret version,
+bekræftet) har ingen `insert_checkboxes()`-metode, saa checkboxen bygges
+direkte som en `setDataValidation`-request (condition type `BOOLEAN`, tomme
+`values`) via `spreadsheet.batch_update()`. Ny fil `trigger_watcher.py`
+poller KUN checkbox-cellen (ét `ws.acell()`-kald pr. runde, ikke hele
+arket) hvert `trigger.poll_interval_s` sekund (config.yaml, standard 60s),
+og trigger ved sandt en fuld `monitor.py`-koersel som adskilt subprocess
+(renere end at kalde `monitor.main()` in-process pga. Playwrights
+asyncio-loop + gentagne logging-handlers). Fanger alle exceptions fra selve
+koerslen saa watcheren aldrig doer af det; SIGINT/SIGTERM haandteres saa
+Ctrl+C/`launchctl stop` stopper loopet paent i stedet for midt i en koersel.
+
+Testet direkte mod det live spreadsheet 2026-07-09: satte B2=TRUE via
+gspread → `trigger_watcher.py --once` opdagede det og satte Status til
+"Kører..." mens en RIGTIG `monitor.py`-subprocess koerte (bekræftet med
+`ps aux` mens den koerte) → koerslen fandt 7 matches/5 bundles og skrev dem
+til Matches/Bundles-fanerne → Status blev "Færdig kl. 07:47 (7 matches, 5
+bundles)", "Sidst kørt" blev "09-07-2026 07:47", og B2 blev nulstillet til
+FALSE (`read_run_now()` bekræftet False bagefter). SIGTERM-test af det
+kontinuerlige loop (`--poll-interval-s 5`) bekræftede paent stop indenfor
+~1 sekund. launchd `KeepAlive`-eksempel (adskilt fra `monitor.py`'s
+`StartCalendarInterval`-eksempel) dokumenteret i README.md, bevidst ikke
+installeret. Begraensning: koer ikke en manuel `monitor.py`-koersel samtidig
+med at watcheren har trigget én -- begge deler `seen.db`/samme Sheet-faner,
+ingen laasning mellem processerne pt. (dokumenteret i README.md).
+
+**CSV-fallback:** `write_local_csv_fallback()` genbruger nøjagtig de
+samme hjælpefunktioner (`_format_kr`, `_display_stand`, `_items_summary`,
+`_short_item_ref`, `build_tldr_line`, `_bundles_header`) som Sheets-
+skrivningen, så CSV'en ikke kan drive ud af sync med Sheets-outputtet.
+Bekræftet ved direkte kald mod fulde 7-match/5-bundle-datasættet fra den
+seneste live-kørsel -- identisk indhold i begge outputs.
+
+## Vedligeholdelse af denne fil
+
+1. Ny idé → tilføj som næste H/G-nummer i den aktive tabel øverst.
+2. Påbegyndt → Status: IN PROGRESS. Leveret → flyt til status-tabellen
+   med dato, tilføj evt. detaljer i "Leverance-detaljer".
+3. Re-scor når forudsætninger ændrer sig — notér i git/commit hvis
+   versioneret.

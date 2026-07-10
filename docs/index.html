@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plagg — Personal Shopper</title>
+<style>
+  :root {
+    --green:  #15803d;
+    --green-bg: #dcfce7;
+    --yellow: #ca8a04;
+    --yellow-bg: #fef9c3;
+    --red:    #dc2626;
+    --red-bg: #fee2e2;
+    --blue:   #2563eb;
+    --bg:     #f8fafc;
+    --card:   #ffffff;
+    --border: #e2e8f0;
+    --text:   #1e293b;
+    --muted:  #64748b;
+    --accent: #0f172a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 15px;
+    line-height: 1.4;
+  }
+  .container { max-width: 640px; margin: 0 auto; padding-bottom: 60px; }
+
+  /* ── Top bar ── */
+  #topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--accent); color: #fff;
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  }
+  #topbar h1 { font-size: 17px; font-weight: 700; flex-shrink: 0; }
+  #status-pill {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: #334155; color: #e2e8f0; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 140px;
+  }
+  #status-pill.ok { background: var(--green-bg); color: var(--green); }
+  #status-pill.busy { background: var(--yellow-bg); color: var(--yellow); }
+  #status-pill.err { background: var(--red-bg); color: var(--red); }
+  #run-now-btn {
+    margin-left: auto; flex-shrink: 0;
+    padding: 9px 16px; border: none; border-radius: 8px;
+    background: var(--blue); color: #fff; font-size: 14px; font-weight: 700;
+    cursor: pointer;
+  }
+  #run-now-btn:disabled { background: #475569; cursor: not-allowed; }
+  #run-now-btn:hover:not(:disabled) { opacity: 0.9; }
+
+  /* ── Sections generic ── */
+  section { padding: 14px; }
+  section h2 {
+    font-size: 13px; font-weight: 800; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;
+  }
+  .empty-hint { color: var(--muted); font-size: 13px; padding: 8px 0; }
+
+  /* ── TL;DR banner ── */
+  #tldr-banner {
+    margin: 14px 14px 0; padding: 12px 14px; border-radius: 10px;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;
+    font-size: 14px; font-weight: 600; white-space: pre-wrap;
+  }
+
+  /* ── Bundle cards ── */
+  .bundle-card, .match-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .card-top-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .badge {
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .badge-reshopper { background: #ede9fe; color: #6d28d9; }
+  .badge-dba { background: #fee2e2; color: #b91c1c; }
+  .badge-source { background: #e2e8f0; color: var(--muted); }
+  .badge-rank { background: #dbeafe; color: var(--blue); }
+  .seller-name { font-weight: 700; font-size: 15px; flex: 1; min-width: 0; }
+  .worth-it-tag {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
+    margin-left: auto;
+  }
+  .worth-it-tag.yes { background: var(--green-bg); color: var(--green); }
+  .worth-it-tag.no  { background: var(--yellow-bg); color: var(--yellow); }
+  .bundle-stats {
+    display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .bundle-stats b { color: var(--text); }
+  .bundle-items { display: flex; flex-direction: column; gap: 4px; }
+  .bundle-items a {
+    font-size: 13px; color: var(--blue); text-decoration: none;
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bundle-items a:hover { text-decoration: underline; }
+
+  /* ── Match cards ── */
+  .match-card { display: flex; flex-direction: column; gap: 4px; }
+  .match-title { font-weight: 700; font-size: 14px; color: var(--blue); text-decoration: none; }
+  .match-title:hover { text-decoration: underline; }
+  .match-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .match-meta b { color: var(--text); }
+  .stand-warn { color: var(--red); font-weight: 700; }
+
+  /* ── Wishlist ── */
+  .wl-row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 0;
+    border-bottom: 1px solid var(--border); font-size: 14px;
+  }
+  .wl-row:last-child { border-bottom: none; }
+  .wl-info { flex: 1; min-width: 0; }
+  .wl-info .wl-primary { font-weight: 700; }
+  .wl-info .wl-secondary { font-size: 12px; color: var(--muted); }
+  .wl-del-btn {
+    flex-shrink: 0; border: none; background: var(--red-bg); color: var(--red);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+    min-height: 44px; min-width: 44px;
+  }
+  .wl-del-btn:hover { opacity: 0.85; }
+  .wl-del-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #wl-form {
+    margin-top: 12px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  #wl-form .full { grid-column: 1 / -1; }
+  #wl-form label {
+    font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.3px; display: block; margin-bottom: 3px;
+  }
+  #wl-form input {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 14px; background: var(--bg); color: var(--text);
+  }
+  #wl-form input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px #2563eb22; }
+  #wl-add-btn {
+    grid-column: 1 / -1; margin-top: 4px; padding: 10px; border: none; border-radius: 8px;
+    background: var(--green); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  #wl-add-btn:hover { opacity: 0.9; }
+  #wl-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #wl-error { color: var(--red); font-size: 13px; grid-column: 1 / -1; min-height: 0; }
+
+  #load-error {
+    margin: 14px; padding: 12px 14px; border-radius: 10px;
+    background: var(--red-bg); color: var(--red); font-size: 14px; display: none;
+  }
+
+  /* ── "Kør nu" bekræftelses-banner (uafhængig af knappens disabled-animation) ── */
+  #run-banner {
+    margin: 14px 14px 0; padding: 12px 14px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; display: none;
+  }
+  #run-banner.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; }
+  #run-banner.warn { background: var(--yellow-bg); border: 1px solid #fde68a; color: var(--yellow); }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <h1>Plagg 🧸</h1>
+    <span id="status-pill">–</span>
+    <button id="run-now-btn">Kør nu</button>
+  </div>
+
+  <div class="container">
+    <div id="load-error"></div>
+    <div id="run-banner"></div>
+    <div id="tldr-banner" style="display:none"></div>
+
+    <section id="bundles-section">
+      <h2>Bundles (samlet fragt)</h2>
+      <div id="bundles-list"><div class="empty-hint">Henter…</div></div>
+    </section>
+
+    <section id="matches-section">
+      <h2>Matches</h2>
+      <div id="matches-list"><div class="empty-hint">Henter…</div></div>
+    </section>
+
+    <section id="wishlist-section">
+      <h2>Ønskeseddel</h2>
+      <div id="wishlist-list"><div class="empty-hint">Henter…</div></div>
+
+      <form id="wl-form">
+        <div class="full"><div id="wl-error"></div></div>
+        <div>
+          <label for="wl-type">Type</label>
+          <input id="wl-type" type="text" placeholder="fx bodystocking">
+        </div>
+        <div>
+          <label for="wl-maerke">Mærke</label>
+          <input id="wl-maerke" type="text" placeholder="fx Ganni (valgfrit)">
+        </div>
+        <div>
+          <label for="wl-stoerrelse">Størrelse</label>
+          <input id="wl-stoerrelse" type="text" placeholder="fx 74 eller M">
+        </div>
+        <div>
+          <label for="wl-pris">Maks. pris (kr.) — påkrævet</label>
+          <input id="wl-pris" type="number" min="1" step="1" placeholder="fx 150">
+        </div>
+        <div class="full">
+          <label for="wl-stand">Stand (valgfrit)</label>
+          <input id="wl-stand" type="text" placeholder="fx som nyt">
+        </div>
+        <button type="submit" id="wl-add-btn">Tilføj til ønskeseddel</button>
+      </form>
+    </section>
+  </div>
+
+<script>
+  // ── API-konfiguration (samme mønster som ejendompython/docs/index.html) ──
+  const WORKER_URL = "https://plagg-api.proqual.workers.dev";
+  const LS_KEY     = "plagg_api_key";
+
+  function getApiKey() {
+    return localStorage.getItem(LS_KEY) || "";
+  }
+
+  function apiFetch(path, options = {}) {
+    const key = getApiKey();
+    const headers = { ...(options.headers || {}), "X-API-Key": key };
+    return fetch(WORKER_URL + path, { ...options, headers });
+  }
+
+  function showPasswordPrompt(onSuccess) {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
+      position:fixed;inset:0;background:rgba(15,23,42,0.92);
+      display:flex;align-items:center;justify-content:center;z-index:9999;
+    `;
+    overlay.innerHTML = `
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;
+                  padding:40px;max-width:360px;width:90%;text-align:center;">
+        <div style="font-size:32px;margin-bottom:12px;">🔐</div>
+        <h2 style="color:#f1f5f9;margin:0 0 8px">Plagg</h2>
+        <p style="color:#94a3b8;font-size:14px;margin:0 0 24px">Indtast adgangskode for at fortsætte</p>
+        <input id="pw-input" type="password" placeholder="Adgangskode"
+          style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid #475569;
+                 background:#0f172a;color:#f1f5f9;font-size:15px;box-sizing:border-box;
+                 outline:none;margin-bottom:12px;" />
+        <div id="pw-error" style="color:#f87171;font-size:13px;min-height:20px;margin-bottom:8px;"></div>
+        <button id="pw-btn"
+          style="width:100%;padding:11px;background:#3b82f6;color:#fff;border:none;
+                 border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;">
+          Log ind
+        </button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector("#pw-input");
+    const btn   = overlay.querySelector("#pw-btn");
+    const err   = overlay.querySelector("#pw-error");
+    input.focus();
+
+    async function attempt() {
+      const key = input.value.trim();
+      if (!key) return;
+      btn.disabled = true;
+      btn.textContent = "Tjekker…";
+      // Tjek nøglen mod /api/status -- 200 = gyldig, 401 = forkert
+      try {
+        const res = await fetch(WORKER_URL + "/api/status", {
+          headers: { "X-API-Key": key }
+        });
+        if (res.ok) {
+          localStorage.setItem(LS_KEY, key);
+          overlay.remove();
+          onSuccess();
+        } else {
+          err.textContent = "Forkert adgangskode -- prøv igen.";
+          input.value = "";
+          input.focus();
+          btn.disabled = false;
+          btn.textContent = "Log ind";
+        }
+      } catch {
+        err.textContent = "Kunne ikke nå serveren -- tjek forbindelsen.";
+        btn.disabled = false;
+        btn.textContent = "Log ind";
+      }
+    }
+
+    btn.addEventListener("click", attempt);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") attempt(); });
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+  function fmtKr(n) {
+    if (n === null || n === undefined || isNaN(n)) return "–";
+    return Math.round(n) + " kr.";
+  }
+  function sourceBadgeClass(source) {
+    const s = (source || "").toLowerCase();
+    if (s.includes("reshopper")) return "badge-reshopper";
+    if (s.includes("dba")) return "badge-dba";
+    return "badge-source";
+  }
+
+  // ── Status-pil + polling ─────────────────────────────────────────────────
+  let pollTimer = null;
+
+  function renderStatusPill(statusText) {
+    const pill = document.getElementById("status-pill");
+    pill.textContent = statusText || "–";
+    pill.className = "";
+    const t = (statusText || "").toLowerCase();
+    if (t.includes("kører")) pill.classList.add("busy");
+    else if (t.includes("fejl")) pill.classList.add("err");
+    else pill.classList.add("ok");
+  }
+
+  async function refreshStatus() {
+    try {
+      const res = await apiFetch("/api/status");
+      if (!res.ok) return null;
+      const data = await res.json();
+      renderStatusPill(data.status);
+      renderTldr(data.last_tldr);
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  function renderTldr(text) {
+    const banner = document.getElementById("tldr-banner");
+    if (text && text.trim()) {
+      banner.textContent = text;
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+    }
+  }
+
+  function startStatusPolling() {
+    if (pollTimer) return; // allerede i gang
+    pollTimer = setInterval(async () => {
+      const data = await refreshStatus();
+      if (data && !String(data.status || "").toLowerCase().includes("kører")) {
+        stopStatusPolling();
+        loadMatchesAndBundles(); // frisk data efter en kørsel
+      }
+    }, 3000);
+  }
+  function stopStatusPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    document.getElementById("run-now-btn").disabled = false;
+  }
+
+  // ── "Kør nu" bekræftelses-banner ──────────────────────────────────────────
+  // Knappens disabled-tilstand er kun en kort visuel animation og er IKKE et
+  // pålideligt bevis for at en kørsel rent faktisk er startet (en rigtig
+  // kørsel tager minutter, og status-feltet flipper først når monitor.py
+  // faktisk fanger triggeret). Banneret her er uafhængigt af knappen: det
+  // vises straks ved klik og bliver stående indtil status-pollingen reelt
+  // registrerer at status har ændret sig væk fra baseline, eller indtil et
+  // timeout (hvis ingen ægte kørsel nogensinde starter, fx uden monitor.py).
+  let runBannerWatchTimer = null;
+  let runBannerTimeoutId = null;
+
+  function showRunBanner(text, kind) {
+    const el = document.getElementById("run-banner");
+    el.textContent = text;
+    el.className = kind || "info";
+    el.style.display = "block";
+  }
+  function hideRunBanner() {
+    document.getElementById("run-banner").style.display = "none";
+  }
+  function clearRunBannerWatch() {
+    if (runBannerWatchTimer) { clearInterval(runBannerWatchTimer); runBannerWatchTimer = null; }
+    if (runBannerTimeoutId) { clearTimeout(runBannerTimeoutId); runBannerTimeoutId = null; }
+  }
+
+  document.getElementById("run-now-btn").addEventListener("click", async () => {
+    const btn = document.getElementById("run-now-btn");
+    btn.disabled = true;
+
+    const baselineStatus = (document.getElementById("status-pill").textContent || "").trim().toLowerCase();
+    clearRunBannerWatch();
+    showRunBanner("Kørsel sat i gang -- opdaterer om lidt…", "info");
+
+    try {
+      await apiFetch("/api/trigger", { method: "POST" });
+    } catch {
+      // fejl -- status-polling vil stadig vise seneste kendte status
+    }
+    await refreshStatus();
+    startStatusPolling();
+
+    // Overvåg uafhængigt om status faktisk ændrer sig væk fra baseline.
+    runBannerWatchTimer = setInterval(() => {
+      const current = (document.getElementById("status-pill").textContent || "").trim().toLowerCase();
+      if (current && current !== baselineStatus) {
+        hideRunBanner();
+        clearRunBannerWatch();
+      }
+    }, 1000);
+
+    // Rimeligt timeout hvis ingen ægte kørsel nogensinde starter (fx i test
+    // uden en tilsluttet monitor.py) -- lad brugeren vide at det er usikkert.
+    runBannerTimeoutId = setTimeout(() => {
+      showRunBanner(
+        "Ingen bekræftelse endnu på at kørslen er startet -- tjek at overvågningen (monitor.py) kører.",
+        "warn"
+      );
+      if (runBannerWatchTimer) { clearInterval(runBannerWatchTimer); runBannerWatchTimer = null; }
+    }, 20000);
+  });
+
+  // ── Bundles ──────────────────────────────────────────────────────────────
+  function renderBundles(bundles) {
+    const el = document.getElementById("bundles-list");
+    if (!bundles || bundles.length === 0) {
+      el.innerHTML = '<div class="empty-hint">Ingen bundles endnu.</div>';
+      return;
+    }
+    el.innerHTML = bundles.map(b => {
+      const items = Array.isArray(b.items) ? b.items : [];
+      const worthIt = !!b.bundle_worth_it;
+      const itemLinks = items.map(it => {
+        const label = escapeHtml(it.title || it.brand || it.size || "annonce");
+        const price = it.price != null ? ` — ${fmtKr(it.price)}` : "";
+        return `<a href="${escapeHtml(it.url || '#')}" target="_blank" rel="noopener">${label}${price}</a>`;
+      }).join("");
+      return `
+        <div class="bundle-card">
+          <div class="card-top-row">
+            <span class="seller-name">${escapeHtml(b.seller_name || "ukendt sælger")}</span>
+            <span class="badge ${sourceBadgeClass(b.source)}">${escapeHtml(b.source || "?")}</span>
+            <span class="worth-it-tag ${worthIt ? 'yes' : 'no'}">${worthIt ? 'Betaler sig' : 'Kun 1 item'}</span>
+          </div>
+          <div class="bundle-stats">
+            <span>${b.item_count} stk.</span>
+            <span><b>${fmtKr(b.effective_price_per_item)}</b>/stk.</span>
+            <span>Besparelse: <b>${fmtKr(b.savings_per_item)}</b>/stk.</span>
+            <span>Fragt: ${fmtKr(b.shipping_dkk)}${b.shipping_is_assumed ? ' (antaget)' : ''}</span>
+          </div>
+          <div class="bundle-items">${itemLinks}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  // ── Matches ──────────────────────────────────────────────────────────────
+  function renderMatches(matches) {
+    const el = document.getElementById("matches-list");
+    if (!matches || matches.length === 0) {
+      el.innerHTML = '<div class="empty-hint">Ingen matches endnu.</div>';
+      return;
+    }
+    el.innerHTML = matches.map(m => {
+      const standText = m.stand || "";
+      const isBad = standText.toLowerCase().includes("defekt");
+      return `
+        <div class="match-card">
+          <div class="card-top-row">
+            <a class="match-title" href="${escapeHtml(m.url || '#')}" target="_blank" rel="noopener">
+              ${escapeHtml(m.title || "Se annonce")}
+            </a>
+            ${m.match_rank ? `<span class="badge badge-rank">${escapeHtml(m.match_rank)}</span>` : ""}
+            <span class="badge ${sourceBadgeClass(m.source)}">${escapeHtml(m.source || "?")}</span>
+          </div>
+          <div class="match-meta">
+            <span><b>${fmtKr(m.price)}</b></span>
+            ${m.size ? `<span>Str. <b>${escapeHtml(m.size)}</b></span>` : ""}
+            ${m.brand ? `<span>${escapeHtml(m.brand)}</span>` : ""}
+            ${standText ? `<span class="${isBad ? 'stand-warn' : ''}">${isBad ? '⚠ ' : ''}${escapeHtml(standText)}</span>` : ""}
+            ${m.seller_name ? `<span>Sælger: ${escapeHtml(m.seller_name)}</span>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  async function loadMatchesAndBundles() {
+    try {
+      const [bRes, mRes] = await Promise.all([
+        apiFetch("/api/bundles"),
+        apiFetch("/api/matches"),
+      ]);
+      if (bRes.ok) renderBundles(await bRes.json());
+      if (mRes.ok) renderMatches(await mRes.json());
+    } catch {
+      // netværksfejl -- ignorér, lister forbliver som de var
+    }
+  }
+
+  // ── Ønskeseddel-CRUD ─────────────────────────────────────────────────────
+  async function loadWishlist() {
+    const el = document.getElementById("wishlist-list");
+    try {
+      const res = await apiFetch("/api/wishlist");
+      if (!res.ok) {
+        el.innerHTML = '<div class="empty-hint">Kunne ikke hente ønskeseddel.</div>';
+        return;
+      }
+      const items = await res.json();
+      if (!items || items.length === 0) {
+        el.innerHTML = '<div class="empty-hint">Ønskesedlen er tom.</div>';
+        return;
+      }
+      el.innerHTML = items.map(w => `
+        <div class="wl-row" data-id="${w.id}">
+          <div class="wl-info">
+            <div class="wl-primary">${escapeHtml(w.type)}${w.maerke ? ' — ' + escapeHtml(w.maerke) : ''} · str. ${escapeHtml(w.stoerrelse)}</div>
+            <div class="wl-secondary">
+              ${w.maks_pris ? 'Maks ' + fmtKr(w.maks_pris) : 'Ingen prisgrænse'}${w.stand ? ' · ' + escapeHtml(w.stand) : ''}
+            </div>
+          </div>
+          <button class="wl-del-btn" data-id="${w.id}"
+            data-type="${escapeHtml(w.type)}"
+            data-maerke="${escapeHtml(w.maerke || '')}"
+            data-stoerrelse="${escapeHtml(w.stoerrelse)}">Slet</button>
+        </div>
+      `).join("");
+
+      el.querySelectorAll(".wl-del-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          const confirmLabel = [btn.dataset.type, btn.dataset.maerke].filter(Boolean).join(" ");
+          const confirmed = confirm(`Slet ${confirmLabel} str. ${btn.dataset.stoerrelse}?`);
+          if (!confirmed) return;
+          btn.disabled = true;
+          btn.textContent = "Sletter…";
+          try {
+            const res = await apiFetch(`/api/wishlist/${id}`, { method: "DELETE" });
+            if (res.ok) {
+              await loadWishlist();
+            } else {
+              btn.disabled = false;
+              btn.textContent = "Slet";
+            }
+          } catch {
+            btn.disabled = false;
+            btn.textContent = "Slet";
+          }
+        });
+      });
+    } catch {
+      el.innerHTML = '<div class="empty-hint">Kunne ikke hente ønskeseddel.</div>';
+    }
+  }
+
+  document.getElementById("wl-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById("wl-error");
+    errEl.textContent = "";
+    const type = document.getElementById("wl-type").value.trim();
+    const maerke = document.getElementById("wl-maerke").value.trim();
+    const stoerrelse = document.getElementById("wl-stoerrelse").value.trim();
+    const maksPrisRaw = document.getElementById("wl-pris").value.trim();
+    const stand = document.getElementById("wl-stand").value.trim();
+
+    if (!type || !stoerrelse) {
+      errEl.textContent = "Type og størrelse er påkrævet.";
+      return;
+    }
+
+    // Maks-pris skal udfyldes med et gyldigt tal > 0. Systemets matching
+    // (matching.py) bruger maks_pris=0 til at UDELUKKE alt -- et tomt/ugyldigt
+    // felt må derfor ALDRIG stille falde tilbage til 0, det ville se ud som
+    // "ingen prisgrænse" men reelt betyde at ønsket aldrig matcher noget.
+    const maksPris = Number(maksPrisRaw);
+    if (maksPrisRaw === "" || !isFinite(maksPris) || maksPris <= 0) {
+      errEl.textContent = "Angiv en gyldig maks. pris i kr. (større end 0) -- feltet må ikke stå tomt.";
+      return;
+    }
+
+    const btn = document.getElementById("wl-add-btn");
+    btn.disabled = true;
+    btn.textContent = "Tilføjer…";
+    try {
+      const res = await apiFetch("/api/wishlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type, maerke, stoerrelse,
+          maks_pris: maksPris,
+          stand,
+        }),
+      });
+      if (res.ok) {
+        document.getElementById("wl-form").reset();
+        await loadWishlist();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        errEl.textContent = data.error || "Kunne ikke tilføje -- prøv igen.";
+      }
+    } catch {
+      errEl.textContent = "Kunne ikke nå serveren -- tjek forbindelsen.";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Tilføj til ønskeseddel";
+    }
+  });
+
+  // ── Boot ─────────────────────────────────────────────────────────────────
+  async function loadData() {
+    const errBox = document.getElementById("load-error");
+    errBox.style.display = "none";
+    const status = await refreshStatus();
+    if (status === null) {
+      errBox.textContent = "Kunne ikke hente data fra serveren. Tjek din forbindelse og prøv at genindlæse siden.";
+      errBox.style.display = "block";
+    }
+    if (status && String(status.status || "").toLowerCase().includes("kører")) {
+      document.getElementById("run-now-btn").disabled = true;
+      startStatusPolling();
+    }
+    await Promise.all([loadMatchesAndBundles(), loadWishlist()]);
+  }
+
+  if (getApiKey()) {
+    loadData();
+  } else {
+    showPasswordPrompt(loadData);
+  }
+</script>
+</body>
+</html>

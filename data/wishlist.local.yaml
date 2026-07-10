@@ -1,0 +1,21 @@
+# Lokal ønskeseddel-fallback -- bruges naar config.yaml har wishlist.source: "local".
+# Formaal: kunne unit-teste matching-/bundling-logikken uden Google Sheets-adgang.
+# Samme felter som Sheet-fanen "Ønskeseddel" ville have: type, mærke, størrelse,
+# maks_pris, stand (stand er valgfri -- se brief §4).
+#
+# De to poster herunder er de officielle valideringsposter fra
+# personal-shopper-brief.md §4/§9: Birkholm leggings str. 104, Zara bukser str. 104.
+# maks_pris er IKKE givet i briefen -- 150 kr. er en fornuftig demo-graense, saet af
+# bygge-agenten. Justér frit, eller brug Sheet-fanen i drift.
+
+- type: "leggings"
+  maerke: "Birkholm"
+  stoerrelse: "104"
+  maks_pris: 150
+  stand: ""
+
+- type: "bukser"
+  maerke: "Zara"
+  stoerrelse: "104"
+  maks_pris: 150
+  stand: ""

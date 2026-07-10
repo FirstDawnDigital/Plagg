@@ -1,0 +1,33 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Lokal state -- IKKE del af koden, genereres ved koersel
+seen.db
+monitor.log
+monitor.log.*
+trigger_watcher.log
+trigger_watcher.log.*
+trigger_watcher_stdout.log
+trigger_watcher_stderr.log
+spreadsheet_id.txt
+matches_fallback.csv
+bundles_fallback.csv
+watch_*
+cloudflare/.wrangler/
+
+# Credentials -- kopiér ALDRIG service account-noeglefiler ind i dette repo.
+# config.yaml peger paa credentials-filen med en ABSOLUT sti udenfor repoet
+# (se README.md) -- men denne linje er en sikkerhedsnet-regel hvis nogen
+# alligevel skulle lave en lokal kopi ved en fejl.
+google_credentials*.json
+*.credentials.json
+
+# DBA-login-session (G1) -- cookies for den dedikerede DBA-konto
+# (firstdawndigital@gmail.com). Aldrig i git, indeholder auth-tokens.
+.dba_storage_state.json
+.dba_session/
+
+# G5-hemmeligheder (Turso/Cloudflare) -- aldrig i git.
+secrets.env

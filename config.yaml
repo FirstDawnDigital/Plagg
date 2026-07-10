@@ -1,0 +1,112 @@
+# Konfiguration for Personal Shopper -- branch "Brugt børnetøj" (Reshopper)
+# Se ../personal-shopper-brief.md for den fulde opgavebeskrivelse og
+# BACKLOG.md for F1-spikens fund (styrer valgene nedenfor).
+
+# ─────────────────────────────────────────────
+# Ønskeseddel: Google Sheet-fane (foretrukket i drift) eller lokal fil (test/fallback)
+# ─────────────────────────────────────────────
+wishlist:
+  source: "sheet"               # "sheet" eller "local" -- "sheet" er nu det rigtige ark, Esbens kone redigerer selv fanen
+  sheet_tab_name: "Ønskeseddel" # fane-navn i dashboard-sheetet naar source: sheet
+  local_path: "data/wishlist.local.yaml"
+
+# ─────────────────────────────────────────────
+# Google Sheets-output (dashboard)
+# ─────────────────────────────────────────────
+google_sheets:
+  # Genbruger service accountet fra ejendompython-arkivet -- ingen nyt Google Cloud-
+  # projekt noedvendigt (se BACKLOG.md, afklarede spoergsmaal). Kopiér ALDRIG denne
+  # fil ind i dette repo -- den ligger og bliver kun refereret her.
+  credentials_file: "/Users/server/# Claude tmux/PLAGG/CC ARCHIVE/ejendompython/google_credentials.json"
+  # Udfyldes automatisk foerste gang scriptet koerer, HVIS auto-oprettelse lykkes.
+  # BEKRÆFTET 2026-07-08/09: dette service account har 0 Drive-lagerkvote (403 paa
+  # baade Drive-API files.create og Sheets-API spreadsheets.create), saa auto-
+  # oprettelse fejler i praksis. Se README.md "Google Sheets-opsætning" for det
+  # noedvendige manuelle engangstrin (opret et ark, del det med service accountets
+  # mail som redigeringsberettiget, saet dets ID her).
+  spreadsheet_id: "1EjCrvQmHcTz6MAhSYhQYPCfbB9rTKyscMJJ5ZtNPjO4"
+  spreadsheet_title: "Personal Shopper – Reshopper børnetøj"
+  share_with_email: "esbvall@gmail.com"
+
+# ─────────────────────────────────────────────
+# Playwright / Reshopper-adfaerd
+# ─────────────────────────────────────────────
+playwright:
+  headless: true               # bekraeftet i F1-spike: headless=True giver 200 paa forsiden
+  min_delay_s: 5                # laengere end blocket.py/kleinanzeigen.py's 3-8s -- Esbens
+  max_delay_s: 15               # eksplicitte oenske om lavfrekvent/skaansom kadence (robots.txt Disallow: /)
+  # Reshoppers soegeresultatside viser 10 kort ved foerste load (ingen bekraeftet
+  # infinite-scroll/"vis flere"-trigger i headless-test 2026-07-09) -- kendt
+  # begraensning, se BACKLOG.md.
+  max_results_per_term: 10
+
+# ─────────────────────────────────────────────
+# Playwright / DBA-adfaerd (G1: DBA som ny kilde)
+# ─────────────────────────────────────────────
+dba:
+  # Playwright storage_state-fil med en logget-ind session for en DEDIKERET
+  # DBA-konto (firstdawndigital@gmail.com) -- IKKE i git (se .gitignore).
+  # Genskabes ved manuel login + Cookie-Editor-eksport naar den udloeber, se
+  # README.md og BACKLOG.md's G1-fund. Scriptet forsoeger ALDRIG selv at
+  # logge ind eller forny denne fil.
+  storage_state_file: ".dba_storage_state.json"
+  headless: true
+  # DBAs robots.txt er mere permissiv end Reshoppers (kun /my-page,
+  # /messages, /favorites, /profile*, /map* disallowed), men samme
+  # skaansomme kadence alligevel -- Esbens graazone-aftale gaelder hele
+  # projektet, ikke kun de kilder med den strengeste robots.txt.
+  min_delay_s: 5
+  max_delay_s: 15
+  # DBAs soegeresultatside gav typisk 8-10 unikke annoncer pr. term ved
+  # foerste load i test 2026-07-09 -- samme antagelse som Reshopper, ingen
+  # bekraeftet "vis flere"-trigger undersoegt endnu.
+  max_results_per_term: 10
+
+# ─────────────────────────────────────────────
+# Bundling / fragt-oekonomi
+# ─────────────────────────────────────────────
+bundling:
+  # Bruges KUN hvis en saelgers annoncer undtagelsesvist ikke oplyser fragtpris i
+  # deres schema.org-data (se sources/reshopper.py) -- observeret sjaeldent i test.
+  default_shipping_dkk: 39
+
+db_path: "seen.db"
+log_path: "monitor.log"
+
+# ─────────────────────────────────────────────
+# I1: Trigger-fra-Sheet -- lader Esbens kone starte en koersel NU fra selve
+# Sheetet (checkbox i "Kontrolpanel"-fanen) i stedet for at vente paa naeste
+# 2x-dagligt scheduled task. Selve pollingen sker i trigger_watcher.py, som
+# koeres som en LOENGEREVARENDE proces ved siden af (ikke i stedet for) det
+# eksisterende launchd-scheduled-task -- se README.md for launchd-eksempel.
+# ─────────────────────────────────────────────
+trigger:
+  enabled: true
+  control_tab_name: "Kontrolpanel"
+  # Kritik-loop 2 (2026-07-09): 60s gav op til et helts minuts stilhed efter klik
+  # uden nogen feedback -- sat ned til 15s saa "klikkede jeg forkert?"-vinduet
+  # bliver kort nok til at vaere til at leve med for en utaalmodig bruger.
+  poll_interval_s: 15   # hvor ofte trigger_watcher.py laeser checkbox-cellen (sekunder)
+  # G5: hvilket kontrolpanel trigger_watcher.py poller -- "sheet" (default,
+  # UAENDRET adfaerd) er den eksisterende Kontrolpanel-fane. "turso" bruger i
+  # stedet Turso's control-tabel (den nye hostede webapp). Skift KUN til
+  # "turso" naar Esben eksplicit vil bruge webappen i stedet for Sheetet.
+  source: "sheet"        # "sheet" eller "turso"
+
+# ─────────────────────────────────────────────
+# G5: Turso (hostet webapp) -- rent additivt spor ved siden af Sheets.
+# Roeres KUN hvis output.targets/trigger.source/wishlist.source eksplicit
+# saettes til at bruge "turso" nedenfor -- ellers har denne sektion ingen
+# effekt overhovedet.
+# ─────────────────────────────────────────────
+turso:
+  secrets_path: "secrets.env"
+
+# ─────────────────────────────────────────────
+# G5: hvor resultaterne skrives hen. ["sheet"] er PRÆCIS dagens adfaerd (kun
+# Google Sheets, inkl. CSV-fallback som hidtil). Tilfoej "turso" for at
+# dual-write'e til den nye webapp ved siden af -- fjern ALDRIG "sheet" uden at
+# Esben selv har bedt om det.
+# ─────────────────────────────────────────────
+output:
+  targets: ["sheet"]   # ["sheet"] | ["turso"] | ["sheet", "turso"]
