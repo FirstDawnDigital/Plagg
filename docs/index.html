@@ -444,13 +444,18 @@
 
     // Rimeligt timeout hvis ingen ægte kørsel nogensinde starter (fx i test
     // uden en tilsluttet monitor.py) -- lad brugeren vide at det er usikkert.
+    // trigger_watcher.py poller kun hvert 15. sek. (config.yaml
+    // trigger.poll_interval_s) -- et 20s-timeout gav kun ~5s margin til
+    // Turso/Worker-latens oveni, saa beskeden dukkede op selvom kørslen
+    // reelt startede kort efter. 45s giver rigelig plads til et fuldt
+    // poll-interval plus netvaerksrundtur.
     runBannerTimeoutId = setTimeout(() => {
       showRunBanner(
         "Ingen bekræftelse endnu på at kørslen er startet -- tjek at overvågningen (monitor.py) kører.",
         "warn"
       );
       if (runBannerWatchTimer) { clearInterval(runBannerWatchTimer); runBannerWatchTimer = null; }
-    }, 20000);
+    }, 45000);
   });
 
   // ── Bundles ──────────────────────────────────────────────────────────────
