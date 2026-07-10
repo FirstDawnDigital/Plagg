@@ -15,6 +15,7 @@ Prioritering (brief §5):
   Alt filtreres FOERST mod maks-pris.
 """
 import logging
+import re
 
 logger = logging.getLogger("personal_shopper.matching")
 
@@ -34,6 +35,68 @@ TYPE_SYNONYMS = {
 }
 
 GENERIC_BRAND_MARKERS = {"", "ukendt", "unknown", "blandet", "diverse", "no brand"}
+
+# G6: 5-trins normaliseret stand-skala paa tvaers af Reshopper/DBA/Sellpy/
+# Vinted -- hver platform bruger sin egen fritekst-formulering (Reshopper
+# "Helt ny"/"Næsten som ny"/"God, men brugt"/"Defekt, kan laves"; Sellpy
+# "Nyt"/"Meget god"/"God"/"Acceptabelt"; Vinted "Ny med prismærker"/"Meget
+# god"/"God"/...; DBA fritekst-extra + samme CONDITION_MAP-fallback som
+# Reshopper). Rangeret bedst (0) til vaerst (4) -- KUN raekkefoelgen taeller.
+STAND_TIERS = ["ny", "naesten_ny", "god", "brugt", "defekt"]
+STAND_TIER_RANK = {tier: i for i, tier in enumerate(STAND_TIERS)}
+STAND_TIER_LABELS = {
+    "ny": "Ny", "naesten_ny": "Næsten som ny", "god": "God",
+    "brugt": "Brugt", "defekt": "Defekt",
+}
+
+# Keyword-heuristik i stedet for en fast per-kilde opslagstabel -- en fast
+# tabel ville vaere skroebel mod DBAs frie "Stand"-tekst (saelgeren skriver
+# selv teksten, ingen bekraeftet fast liste, se sources/dba.py) og mod
+# fremtidige formuleringsaendringer paa de andre platforme. RAEKKEFOELGEN er
+# vigtig: mest specifikke/alvorlige moenstre proeves FOERST, saa en streng
+# med flere keywords (fx "God, men brugt") rammer det rigtige tier foerst i
+# stedet for at et senere "brugt"-keyword fejlagtigt overtrumfer "god".
+_STAND_PATTERNS = [
+    (re.compile(r"defekt|i stykker|beskadiget|damaged", re.IGNORECASE), "defekt"),
+    (re.compile(r"næsten|naesten|\bsom ny\b|meget god|rigtig god|istandsat", re.IGNORECASE), "naesten_ny"),
+    (re.compile(r"\bny\b|\bnyt\b|ny med|ny uden|unused|ubrugt", re.IGNORECASE), "ny"),
+    (re.compile(r"tilfredsstillende|rimelig|acceptabelt|\bslidt\b", re.IGNORECASE), "brugt"),
+    (re.compile(r"\bgod\b", re.IGNORECASE), "god"),
+    (re.compile(r"\bbrugt\b", re.IGNORECASE), "brugt"),
+]
+
+
+def normalize_stand(raw: str) -> str | None:
+    """Klassificerer en stand-fritekst (fra ENHVER kilde) til én af de 5
+    STAND_TIERS via keyword-heuristik (se _STAND_PATTERNS). Returnerer None
+    for tom/'ukendt'/ikke-genkendt formulering -- en ukendt stand skal
+    ALDRIG udelukke et match (samme permissive princip som G7s
+    stoerrelsesloese oensker), kun en KENDT for-lav stand goer det (se
+    _stand_ok)."""
+    if not raw:
+        return None
+    s = str(raw).strip().lower()
+    if not s or s == "ukendt":
+        return None
+    for pattern, tier in _STAND_PATTERNS:
+        if pattern.search(s):
+            return tier
+    return None
+
+
+def _stand_ok(wl_stand: str, item_stand: str) -> bool:
+    """G6: oenskets stand-fritekst er en MINIMUMS-taerskel, ikke et eksakt
+    krav -- et 'god'-oenske accepterer ogsaa 'naesten_ny'/'ny'-fund, ikke kun
+    praecis 'god'. Returnerer True (blokerer IKKE) medmindre BAADE oenske og
+    annonce har en GENKENDT stand og annoncens er strengt vaerre end
+    oensket -- ukendt/tom stand paa enten side blokerer aldrig."""
+    wl_tier = normalize_stand(wl_stand)
+    if wl_tier is None:
+        return True  # oensket stiller intet stand-krav
+    item_tier = normalize_stand(item_stand)
+    if item_tier is None:
+        return True  # ukendt annonce-stand -- benefit of the doubt
+    return STAND_TIER_RANK[item_tier] <= STAND_TIER_RANK[wl_tier]
 
 
 def _type_matches(wishlist_type: str, item_title: str) -> bool:
@@ -127,6 +190,9 @@ def match_item(wishlist_item: dict, listing: dict) -> dict | None:
     if brand_rank is None:
         return None
 
+    if not _stand_ok(wishlist_item.get("stand", ""), listing.get("stand") or ""):
+        return None
+
     overall_rank = "eksakt" if (size_rank == "eksakt" and brand_rank == "eksakt") else "naer match"
 
     enriched = dict(listing)
@@ -134,6 +200,10 @@ def match_item(wishlist_item: dict, listing: dict) -> dict | None:
     enriched["wishlist_type"] = wishlist_item["type"]
     enriched["wishlist_maerke"] = wishlist_item.get("maerke", "")
     enriched["wishlist_stoerrelse"] = wishlist_item["stoerrelse"]
+    # G6: normaliseret stand vedhaeftes til visning (fx UI/Sheets kan vise et
+    # konsistent tier paa tvaers af kilder) -- persisteres IKKE i DB/Turso-
+    # skemaet, beregnes on-the-fly hver koersel fra den raa 'stand'.
+    enriched["stand_norm"] = normalize_stand(listing.get("stand") or "")
     return enriched
 
 

@@ -24,8 +24,8 @@ ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
 G14   Vinted-fix: priming-retry+badges  Size 3        DONE
 G15   Størrelse: eksakt/op, aldrig ned  Size 2        DONE
-G6    Stand-normalisering (m. punkt 3)  Size 4-5      NÆSTE
-G16   Vinted land + polsk-nedprioritet  Size 6-7      TODO (afh. profilside)
+G6    Stand-normalisering (m. punkt 3)  Size 4-5      DONE
+G16   Vinted land + polsk-nedprioritet  Size 6-7      NÆSTE (afh. profilside)
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
@@ -73,18 +73,31 @@ stige/intervaller) -- alle bestod; `sources/sellpy._parse_cm_size()`
 end-to-end-tjekket ("CHILD-CM-80"→"80", "CHILD-CM-98/104"→"98/104",
 voksen-skala→""). Size 2, ingen afhængigheder.
 
-**G6 (opdateret — punkt 3 slået sammen hertil) — Stand-normalisering.**
+**G6 (DONE, 2026-07-10 — punkt 3 slået sammen hertil) — Stand-normalisering.**
 Punkt 3 ER en fuld specifikation af det gamle G6. Hver platform angiver
 stand FORSKELLIGT (Reshopper "Næsten som ny"/"God, men brugt"/"Defekt,
 kan laves"; Sellpy "Nyt/Meget god/God/Acceptabelt"; Vinted "Ny med
 prismærker/.../Tilfredsstillende"; DBA fritekst + CONDITION_MAP-fallback).
-**Design:** 5-trins normaliseret skala (ny > næsten_ny > god > brugt >
-defekt) med mapping-tabel pr. kilde (nyt `stand_map`-modul eller i
-`matching.py`); ønskets `stand`-fritekst mappes til en MINIMUMS-tærskel;
-annoncer under tærsklen filtreres/nedtones. Genbrug
-`sheets_output.BAD_STAND_LABELS`-mønstret til visning. Ingen skema-
-ændring strengt nødvendig (kan beregnes on-the-fly), men en
-`stand_norm`-kolonne letter visning. Size 4-5.
+**Leveret:** 5-trins normaliseret skala i `matching.py`
+(`STAND_TIERS = ["ny","naesten_ny","god","brugt","defekt"]`) via
+KEYWORD-heuristik (`normalize_stand()`) i stedet for en fast per-kilde
+opslagstabel -- valgt fordi DBAs "Stand"-felt er ægte fritekst uden
+bekræftet fast værdisæt (sælgeren skriver selv), så en tabel ville være
+skrøbelig. `_stand_ok()` bruger ønskets `stand`-felt som en MINIMUMS-
+tærskel (fx "god" accepterer også "næsten_ny"/"ny", ikke kun "god") og er
+nu et HARDT matching-kriterie i `match_item()` (samme status som
+størrelse/mærke/pris) -- valgt frem for kun visuel nedtoning, fordi Esbens
+formulering ("matcher på tværs af platformene") bad om et reelt
+matchingkriterie, ikke kun kosmetik. Ukendt/tom stand (på ønske ELLER
+annonce) blokerer ALDRIG (benefit of the doubt, samme permissive princip
+som G7). `sheets_output.BAD_STAND_LABELS`/`_display_stand` generaliseret
+til `_is_bad_stand()` (bruger `normalize_stand()==  "defekt"`) så ALLE
+kilders defekt-formuleringer flages, ikke kun Reshoppers ordrette streng.
+Ingen skema-ændring (stand_norm beregnes on-the-fly hvert match, ikke
+persisteret i DB/Turso). **Verificeret:** 22 `normalize_stand()`-cases +
+8 `_stand_ok()`-tærskel-cases + 1 fuld `match_all()`-integrationstest på
+tværs af alle 4 kilder (defekt+under-tærskel-fund korrekt udelukket,
+ny+næsten_ny-fund korrekt bevaret) -- alle bestod. Size 4-5.
 
 **G16 — Vinted land + polsk-nedprioritering (punkt 4+5 slået sammen).**
 BEKRÆFTET LIVE: Vinteds anonyme catalog-hit indeholder INTET land

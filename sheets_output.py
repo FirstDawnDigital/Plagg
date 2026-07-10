@@ -23,17 +23,29 @@ import os
 from collections import Counter
 from datetime import datetime
 
+import matching
+
 logger = logging.getLogger("personal_shopper.sheets_output")
 
 STATE_FILE_DEFAULT = "spreadsheet_id.txt"
 
-# H3 (BACKLOG.md demo-kritik): stand-labels der reelt betyder "noget er galt",
-# jf. sources/reshopper.py's KNOWN_STAND_LABELS/CONDITION_MAP. Kun "Defekt, kan
-# laves" er en NEGATIV stand -- "Næsten som ny"/"God, men brugt" er begge fint
-# brugbare stande og skal IKKE flages.
+# H3 (BACKLOG.md demo-kritik): stand-labels der reelt betyder "noget er galt".
+# G6 (2026-07-10): generaliseret fra en fast Reshopper-specifik streng til
+# matching.normalize_stand() == "defekt" -- saa DBA/Sellpy/Vinteds egne
+# formuleringer af "defekt" (fx "Beskadiget", "I stykker") OGSAA flages, ikke
+# kun Reshoppers ordrette "Defekt, kan laves". BAD_STAND_LABELS bevares som
+# et par kendte, ordrette eksempler til reference/dokumentation, men selve
+# tjekket (_is_bad_stand) bruger nu normalize_stand.
 BAD_STAND_LABELS = {"Defekt, kan laves"}
 STAND_WARNING_PREFIX = "⚠️ "
 STAND_WARNING_BG = {"red": 0.98, "green": 0.85, "blue": 0.82}
+
+
+def _is_bad_stand(stand: str) -> bool:
+    """G6: True hvis stand-friteksten (fra ENHVER kilde) normaliserer til
+    'defekt'-tieret (se matching.normalize_stand) -- IKKE en fast streng-
+    sammenligning, saa nye/andre kilders defekt-formuleringer flages ens."""
+    return matching.normalize_stand(stand) == "defekt"
 
 # H1: MATCHES_HEADER faar en "Opslag-ID"-kolonne (kort, unik del af item-ID'et)
 # saa to ens-udseende raekker fra samme saelger tydeligt kan ses som to
@@ -89,7 +101,7 @@ def _display_stand(stand: str) -> str:
     'Defekt, kan laves') saa de ikke fremstaar ligevaerdige med god stand i
     en hurtig visuel skim af Matches-fanen."""
     stand = stand or "ukendt"
-    if stand in BAD_STAND_LABELS:
+    if _is_bad_stand(stand):
         return f"{STAND_WARNING_PREFIX}{stand}"
     return stand
 
@@ -386,7 +398,7 @@ def write_matches(spreadsheet, matches: list[dict], first_seen_lookup: dict, now
         wl_ref = f"{m.get('wishlist_type', '')}/{m.get('wishlist_maerke', '') or 'generisk'}/{m.get('wishlist_stoerrelse', '')}"
         first_seen = first_seen_lookup.get(m.get("_db_id"), now_str)
         stand_raw = m.get("stand", "ukendt")
-        if stand_raw in BAD_STAND_LABELS:
+        if _is_bad_stand(stand_raw):
             bad_stand_rows.append(idx + 2)  # +2: header er raekke 1, data starter raekke 2
         data.append([
             make_hyperlink(m.get("url", "")),
