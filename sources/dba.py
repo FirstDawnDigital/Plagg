@@ -37,6 +37,16 @@ podlet-isolated>). G1-spike (BACKLOG.md, 2026-07-09) bekraeftede:
     Reshoppers best-effort regex-udtraek), fragttekst ("Fragt fra 29,99 kr.
     + ...") og en praecis dansk stand-label via extras-listen (id="condition",
     label="Stand") -- mere praecis end JSON-LD's grove itemCondition-enum.
+    G6-RETTELSE (2026-07-11, live verificeret paa ~30 rigtige annoncer):
+    denne "condition"-extra er en FAST facet paa DBAs eget opslagsformular
+    (hvert hit har et 'valueId', ikke kun en fritekst-'value') -- IKKE
+    fritekst som tidligere antaget i matching.py's kommentarer. Observerede
+    vaerdier for boernetoej: valueId 1 "Helt ny - uåbnet/med prismærke",
+    2 "Som ny - ingen synlige brugsspor", 3 "Brugt - men i god stand".
+    Ingen huller i 1-3, saa formentlig hele saettet for denne kategori.
+    matching.normalize_stand()'s keyword-heuristik klassificerer alle tre
+    korrekt (til hhv. "ny"/"naesten_ny"/"god"), saa ingen kode-aendring var
+    noedvendig -- kun denne dokumentations-rettelse.
     Denne JSON er SERVER-renderet (til stede allerede ved domcontentloaded,
     ikke afhaengig af klient-hydrering saa taet som DOM-tekst-scanning), men
     er stadig en UOFFICIEL/udokumenteret intern struktur -- kan braekke ved

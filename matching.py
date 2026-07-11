@@ -59,10 +59,16 @@ STAND_TIER_LABELS = {
     "brugt": "Brugt", "defekt": "Defekt",
 }
 
-# Keyword-heuristik i stedet for en fast per-kilde opslagstabel -- en fast
-# tabel ville vaere skroebel mod DBAs frie "Stand"-tekst (saelgeren skriver
-# selv teksten, ingen bekraeftet fast liste, se sources/dba.py) og mod
-# fremtidige formuleringsaendringer paa de andre platforme. RAEKKEFOELGEN er
+# Keyword-heuristik i stedet for en fast per-kilde opslagstabel. RETTELSE
+# (2026-07-11, live verificeret mod ~30 rigtige DBA-annoncer): DBAs "Stand"-
+# extra er IKKE fritekst som tidligere antaget her -- den har et 'valueId'
+# (1/2/3 observeret: "Helt ny - uåbnet/med prismærke" / "Som ny - ingen
+# synlige brugsspor" / "Brugt - men i god stand"), dvs. en fast facet paa
+# DBAs eget opslagsformular, ligesom Reshoppers KNOWN_STAND_LABELS. Keyword-
+# heuristikken bruges alligevel (frem for en per-kilde opslagstabel) fordi
+# den ALLEREDE klassificerer alle 3 kendte DBA-vaerdier korrekt, og fordi
+# den robust daekker fremtidige formuleringsaendringer paa alle 4 platforme
+# uden kode-aendring. RAEKKEFOELGEN er
 # vigtig: mest specifikke/alvorlige moenstre proeves FOERST, saa en streng
 # med flere keywords (fx "God, men brugt") rammer det rigtige tier foerst i
 # stedet for at et senere "brugt"-keyword fejlagtigt overtrumfer "god".

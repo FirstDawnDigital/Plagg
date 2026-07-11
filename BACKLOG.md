@@ -82,9 +82,16 @@ prismærker/.../Tilfredsstillende"; DBA fritekst + CONDITION_MAP-fallback).
 **Leveret:** 5-trins normaliseret skala i `matching.py`
 (`STAND_TIERS = ["ny","naesten_ny","god","brugt","defekt"]`) via
 KEYWORD-heuristik (`normalize_stand()`) i stedet for en fast per-kilde
-opslagstabel -- valgt fordi DBAs "Stand"-felt er ægte fritekst uden
-bekræftet fast værdisæt (sælgeren skriver selv), så en tabel ville være
-skrøbelig. `_stand_ok()` bruger ønskets `stand`-felt som en MINIMUMS-
+opslagstabel. **RETTELSE (2026-07-11, live verificeret paa ~30 rigtige
+DBA-annoncer):** DBAs "Stand"-extra er IKKE fritekst som først antaget
+her -- den har et `valueId` (fast facet, ligesom Reshoppers
+KNOWN_STAND_LABELS), observeret som valueId 1 "Helt ny - uåbnet/med
+prismærke", 2 "Som ny - ingen synlige brugsspor", 3 "Brugt - men i god
+stand" (ingen huller i 1-3, formentlig hele sættet for børnetøj).
+Keyword-heuristikken beholdes alligevel frem for en per-kilde
+opslagstabel, da den allerede klassificerer alle 3 DBA-værdier korrekt
+OG robust dækker fremtidige formuleringsændringer på alle 4 platforme
+uden kode-ændring. `_stand_ok()` bruger ønskets `stand`-felt som en MINIMUMS-
 tærskel (fx "god" accepterer også "næsten_ny"/"ny", ikke kun "god") og er
 nu et HARDT matching-kriterie i `match_item()` (samme status som
 størrelse/mærke/pris) -- valgt frem for kun visuel nedtoning, fordi Esbens
