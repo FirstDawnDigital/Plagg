@@ -26,6 +26,7 @@ G14   Vinted-fix: priming-retry+badges  Size 3        DONE
 G15   Størrelse: eksakt/op, aldrig ned  Size 2        DONE
 G6    Stand-normalisering (m. punkt 3)  Size 4-5      DONE
 G16   Vinted land + polsk-nedprioritet  Size 6-7      DONE
+G17   Stand-dropdown (harmoniseret UI)  Size 2        DONE
 G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
@@ -140,6 +141,33 @@ data (bekræftet: testrækken væk, 15 rigtige matches tilbage). 52
 Vinted-rækker fra FØR G16 nulstillet (`details_fetched=0`) for
 naturlig land-backfill ved genopdagelse -- ingen tvungen fuld-backfill
 (scope-afgrænset, selvhelende over tid). Size 6-7.
+
+**G17 (DONE, 2026-07-11) — Stand-dropdown (harmoniseret UI).** Esben
+spurgte om en dropdown for ønskesedlens stand-felt "med harmoniseret
+matching", opfølgning på G6. G6 byggede allerede den harmoniserede
+matching-motor (`matching.normalize_stand()`), men ønskesedlens
+`#wl-stand`-felt i webappen var stadig et frit tekstfelt (placeholder
+"fx som nyt") -- en bruger kunne skrive noget `normalize_stand()` ikke
+genkendte, hvilket (per designet permissive fallback) STILLE ingen
+stand-krav i stedet for det tilsigtede. **Leveret:** `docs/index.html`s
+`#wl-stand` er nu et `<select>` med 5 valg: "Alle stande" (tom, intet
+krav), "Ny", "Næsten som ny", "God", "Brugt" -- alle GARANTERET at
+normalisere korrekt, da værdierne er identiske med `matching.
+STAND_TIER_LABELS`. "Defekt" udeladt af dropdown'en bevidst: som
+minimumstærskel er den funktionelt identisk med "Alle stande" (alt
+passerer), så den ville blot vaere et forvirrende ekstra valg. Ingen
+backend-ændring nødvendig -- samme `stand`-felt/API/DB-kolonne som
+før, kun UI'ens input-metode ændret. **Verificeret grundigt:** (1)
+`normalize_stand()` kørt paa alle 4 ikke-tomme dropdown-strenge, alle
+klassificerer korrekt; (2) fuld 5×5 `_stand_ok()`-minimumstærskel-matrix
+(alle kombinationer af ønske × annonce-stand) verificeret korrekt; (3)
+live Playwright-test af selve webappen (lokal http-server mod
+`docs/index.html`, rigtig adgangskode, rigtig Cloudflare Worker-API):
+dropdown'ens 5 optioner bekræftet i DOM'en, en test-ønske tilføjet med
+"God" valgt, bekræftet at "Maks 77 kr. · God" vises korrekt i
+ønskesedlen, testrækken derefter slettet igen via UI'ens egen
+slet-knap og bekræftet fuldstændig væk (ingen rester i Turso). JS-
+syntax verificeret med `node --check`. Size 2.
 
 **Prioriterings-begrundelse:** G14+G15 er små, høj-værdi fixes med nul
 afhængigheder (gøres først). G6 (stand) er den tunge, veldefinerede

@@ -160,11 +160,11 @@
     letter-spacing: 0.3px; display: block; margin-bottom: 3px;
     white-space: normal; overflow-wrap: break-word;
   }
-  #wl-form input {
+  #wl-form input, #wl-form select {
     width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
     font-size: 14px; background: var(--bg); color: var(--text);
   }
-  #wl-form input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px #2563eb22; }
+  #wl-form input:focus, #wl-form select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px #2563eb22; }
   #wl-add-btn {
     grid-column: 1 / -1; margin-top: 4px; padding: 10px; border: none; border-radius: 8px;
     background: var(--green); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
@@ -230,8 +230,14 @@
           <input id="wl-pris" type="number" min="1" step="1" placeholder="fx 150">
         </div>
         <div class="full">
-          <label for="wl-stand">Stand (valgfrit)</label>
-          <input id="wl-stand" type="text" placeholder="fx som nyt">
+          <label for="wl-stand">Min. stand (valgfrit)</label>
+          <select id="wl-stand">
+            <option value="">Alle stande</option>
+            <option value="Ny">Ny</option>
+            <option value="Næsten som ny">Næsten som ny</option>
+            <option value="God">God</option>
+            <option value="Brugt">Brugt</option>
+          </select>
         </div>
         <button type="submit" id="wl-add-btn">Tilføj til ønskeseddel</button>
       </form>
