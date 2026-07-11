@@ -285,7 +285,15 @@ kræves, INGEN cookies/session. **Leveret:** `sources/sellpy.py`s
 nu billigste fragtmulighed op pr. kandidat via dette endpoint (samme
 to-fase-arkitektur som Vinteds land-opslag, G16). **Verificeret:** live
 `monitor.run_source()`-kørsel for Sellpy -- 6/6 kandidater korrekt
-beriget med `shipping_price=39.0`. **Fund #2-bugget rettet med det
+beriget med `shipping_price=39.0`. **Samme cache-faelde som G16 ramte
+også her** (glemt i første omgang): eksisterende Sellpy-rækker i lokal
+`seen.db` havde allerede `details_fetched=1` fra FØR G21 (dengang
+SKIP_DETAIL_FETCH=True selv satte det, "allerede komplet fra kortet"),
+så de sprang det nye fragt-opslag over via cachen og forblev NULL i den
+første produktionskørsel efter denne fix. Samme éngangsløsning som G16:
+nulstillede `details_fetched=0` for alle 87 Sellpy-rækker, ny kørsel
+bekræftede 7/7 friske Sellpy-matches nu korrekt fik `shipping_price=39.0`.
+**Fund #2-bugget rettet med det
 samme** (kræver ikke Vinted-login, kun den allerede kendte
 `seller_country`, se G16): `bundling.py`s `build_bundles()` bruger nu
 IKKE `default_shipping_dkk` for en kendt udenlandsk sælger uden reel
