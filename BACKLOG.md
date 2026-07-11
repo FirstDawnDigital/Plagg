@@ -27,6 +27,8 @@ G15   Størrelse: eksakt/op, aldrig ned  Size 2        DONE
 G6    Stand-normalisering (m. punkt 3)  Size 4-5      DONE
 G16   Vinted land + polsk-nedprioritet  Size 6-7      DONE
 G17   Stand-dropdown (harmoniseret UI)  Size 2        DONE
+G18   Type-matching: fuld taksonomi     Size 6         DONE
+G19   Automatisk periodisk koersel      TBD           TODO (afventer Esben)
 G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
@@ -181,6 +183,56 @@ afhængigheder (gøres først). G6 (stand) er den tunge, veldefinerede
 feature. G16 er størst + mest usikker (bot-risiko) -- placeret efter de
 sikre gevinster, men foran G4/G2/G3 fordi Esben aktivt har prioriteret
 det. G2/G3 forbliver gated på konens faktiske brugsmønster.
+
+**G18 (DONE, 2026-07-11) — Type-matching: fuld taksonomi.** Udløst af
+Esbens kones rapport om Vinted-fund der ikke dukkede op. Live-
+undersøgelse: søgning "kuling jakke" gav 0/20 gyldige matches, selvom
+"Kuling jacka 110" (svensk, præcis rigtig størrelse jf. G15) var blandt
+resultaterne -- `TYPE_SYNONYMS` kendte kun synonymer for "leggings" og
+"bukser", intet for "jakke". Dansk sammensætning ("vinterjakke") virkede
+allerede via substring-match, men fremmedsprogede ord (Vinted blander
+svenske/polske/finske sælgere ind i danske søgeresultater, se G16) blev
+aldrig genkendt. **Leveret:** hentede Sellpys fulde Algolia-facet
+(`metadata.type`, segment=children) -- 200 KONTROLLEREDE danske
+typebetegnelser (sælgeren vælger fra dropdown, ikke fritekst), den mest
+autoritative "type tree" der findes på tværs af kilderne (Reshopper har
+INGEN separat type-facet, kun Alder/Køn/Størrelse/Mærke/Stand, bekræftet
+ved DOM-inspektion). Byggede 11 brede synonym-klynger i `matching.py`
+(jakke, vest, bukser, leggings, kjole, trøje, t-shirt, skjorte, sæt, sko,
+hue) der dækker BÅDE danske ord uden fælles rod (fx "anorak"/"parka" er
+ikke "jakke"-sammensætninger) OG live-verificerede fremmedords-STAMMER
+(polsk "kurtk"/"spodni"/"sukienk"/"zestaw"/"buty", svensk
+"jacka"/"tröj"/"byx"/"kjol", finsk "takki"). `_build_type_synonyms()`
+udvider hver klynge til et fladt opslags-dict, så alle 62 ord i en klynge
+peger på hele klyngens dækning. Resterende ~150 Sellpy-typer (primært
+tilbehør + internationale låneord) er bevidst IKKE klynget -- lavere
+værdi, matcher stadig via literal-ord-fallback som før. **Verificeret:**
+16 syntetiske regressionscases (inkl. at "vest" bevidst IKKE matcher
+"jakke"-ønsker, og at leggings/bukser forbliver adskilte); genkørsel af
+den ORIGINALE "kuling jakke"-søgning gik fra 0/20 til 5/20 bestået
+precheck (resten korrekt udelukket af G15's størrelsesregel, ikke type);
+fuld live-test med Esbens 3 aktuelle ønsker fandt nu reelle
+jakke-kandidater der før var usynlige. Kendt resterende hul (accepteret,
+ikke forfulgt videre): produkter beskrevet kun ved materiale/stil uden et
+genkendt type-ord (fx "Vindfleece" uden "jakke"/"jacka"-stamme) fanges
+stadig ikke -- diminishing returns ift. risiko for falske positiver ved
+at udvide yderligere. Size 6.
+
+**G19 (TODO, afventer Esben) — Ingen automatisk periodisk kørsel.**
+Sideeffekt-fund fra samme undersøgelse: `launchctl`/`crontab` viser INGEN
+planlagt opgave for Personal Shopper overhovedet -- README dokumenterer
+eksplicit at det 2x-dagligt scheduled-task ALDRIG er installeret
+("IKKE installeret automatisk"). Systemet har derfor ALTID udelukkende
+kørt når nogen manuelt trykker "Kør nu" (Sheet eller webapp) -- de to
+`trigger_watcher.py`-processer der kører nu er startet ad-hoc under
+udviklingsarbejdet, ikke en permanent systemtjeneste der overlever en
+genstart. Konkret observeret: sidste kørsel var kl. 00:08, tjekket igen
+kl. 08:45 -- 8,5 timers datastilstand uden nogen har trykket "Kør nu".
+Dette forklarer sandsynligvis (helt eller delvist) hvorfor konens Vinted-
+fund ikke var synlige. **Kræver Esbens beslutning** (installere en
+launchd-tjeneste er en systemniveau-ændring): hvor ofte skal der scannes
+automatisk, og skal det være launchd (README har et færdigt
+KeepAlive-eksempel) eller en anden mekanisme?
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 

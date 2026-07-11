@@ -27,12 +27,83 @@ SIZE_LADDER = [
     "122", "128", "134", "140", "146", "152", "158", "164", "170", "176",
 ]
 
-# Typer der regnes som synonymer for hinanden ved matching -- Reshoppers egne
-# titler blander fx "leggings"/"jeggings", "bukser"/"jeans"/"shorts".
-TYPE_SYNONYMS = {
-    "leggings": {"leggings", "jeggings", "leggins"},
-    "bukser": {"bukser", "jeans", "shorts", "chinos"},
-}
+# G18 (2026-07-11): FULD boernetoejs-type-taksonomi. Kilde: Sellpys Algolia-
+# facet ('metadata.type', segment=children) gav 200 DISTINKTE, kontrollerede
+# danske typebetegnelser (saelgeren vaelger fra en dropdown, ikke fritekst) --
+# den mest autoritative "type tree" vi har adgang til paa tvaers af de 4
+# kilder (Reshopper har INGEN separat type-facet, kun Alder/Koen/Stoerrelse/
+# Maerke/Stand -- bekraeftet ved DOM-inspektion 2026-07-11). Danske
+# SAMMENSAETNINGER (fx "vinterjakke", "softshelljakke") daekkes allerede af
+# almindelig substring-matching (de INDEHOLDER "jakke") og kraever ingen
+# saerskilt klynge-medlemskab -- klyngerne nedenfor daekker KUN (a) danske
+# ord der IKKE deler en faelles rod (fx "anorak"/"parka" er ikke "jakke"-
+# sammensaetninger) og (b) fremmedsprogede ord fra Vinteds internationale
+# saelgere (svensk/polsk/finsk observeret direkte i danske soegeresultater,
+# se G16). Fremmedords-STAMMER (ikke hele ord) bruges hvor boejning varierer
+# -- fx polsk "kurtk" fanger kurtka/kurtki/kurtek/kurtkę.
+#
+# LIVE-VERIFICERET 2026-07-11 (se BACKLOG.md's G18 for detaljer): "Kuling
+# jacka"/"skaljacka" (svensk jakke), "kurtka"/"kurtka przejściowa" (polsk
+# jakke, mange traeff), "tröja"/"tröja med krage" (svensk troeje, mange
+# traeff), "byxor"/"cykelbyxa" (svensk bukser), "spodnie" (polsk bukser,
+# bekraeftet tidligere i G16-arbejdet), "sukienka" (polsk kjole, mange
+# traeff), "zestaw" (polsk saet), "buty"/"sneakersy" (polsk sko, mange
+# traeff), "kuoritakki"/"softshelltakki" (finsk jakke).
+#
+# De resterende ~150 Sellpy-typer (primaert tilbehoer -- Vanter, Rygsaek,
+# Solbriller, Halskaede osv. -- og meget specifikke sport-/sko-undertyper)
+# er IKKE klyngede eksplicit: de matcher stadig via det almindelige literal-
+# ord-fallback (samme adfaerd som foer denne aendring), og er lavere
+# prioritet at fremmedsprogs-daekke (enten sjaeldne oenskesedler-typer eller
+# allerede internationale laaneord som "Blazer"/"Bikini"/"Body").
+_TYPE_CLUSTERS = [
+    # Jakker/frakker (AEGTE ord-varianter -- IKKE "vest", som er sit eget,
+    # aermeloese, cluster nedenfor, jf. Sellpys egen adskillelse).
+    {"jakke", "frakke", "parka", "anorak", "jacka", "takki", "kuoritakki", "kurtk"},
+    {"vest", "ydervest", "dunvest"},
+    # Bukser (leggings er en SEPARAT klynge, se nedenfor -- Esbens
+    # oenskeseddel behandler dem bevidst forskelligt).
+    {"bukser", "jeans", "shorts", "chinos", "kuloty", "byx", "spodni"},
+    {"leggings", "jeggings", "leggins", "treggings"},
+    # Kjoler/nederdele (Sellpy adskiller "Kjole" og "Nederdel", men de
+    # daekkes af samme klynge -- svensk skelner ogsaa mellem "klänning"
+    # (kjole) og "kjol" (nederdel), begge relevante for dette oenske).
+    {"kjole", "nederdel", "sukienk", "klänning", "kjol"},
+    # Troejer/sweatere (varmt, afslappet overdel)
+    {"trøje", "sweater", "hættetrøje", "sweatshirt", "cardigan", "pullover", "tröj"},
+    # T-shirts/toppe (koligere, aermeloes/kortaermet overdel -- bevidst
+    # IKKE samme klynge som troeje/sweater ovenfor)
+    {"t-shirt", "tshirt", "tanktop", "top", "croptop"},
+    # Skjorter/bluser (knap-/vaeve-stof-overdel, adskilt fra t-shirt/troeje)
+    {"skjorte", "bluse", "tunika", "koszulk"},
+    # Saet/heldragter
+    {"sæt", "sparkedragt", "buksedragt", "heldragt", "dragt", "zestaw", "paczk"},
+    # Sko/fodtoej (bredt -- enhver fodtoejstype er relevant for et generisk
+    # "sko"-oenske)
+    {"sko", "sneakers", "støvler", "sandaler", "tøfler", "buty", "skor"},
+    # Hovedbeklaedning
+    {"hue", "kasket", "hat", "mössa", "czapk"},
+]
+
+
+def _build_type_synonyms(clusters: list) -> dict:
+    """Udvider klynger til et fladt opslags-dict: hvert ord i en klynge
+    peger paa HELE klyngens ordsaet, saa uanset hvilket ord i klyngen
+    oensket-typen bruger, faar man samme brede synonym-daekning (fx et
+    oenske om 'sweatshirt' matcher ogsaa 'hættetrøje'/'cardigan'/svensk
+    'tröja', ikke kun praecis 'sweatshirt')."""
+    synonyms = {}
+    for cluster in clusters:
+        for word in cluster:
+            synonyms[word] = cluster
+    return synonyms
+
+
+# Typer der regnes som synonymer for hinanden ved matching -- se _TYPE_CLUSTERS
+# ovenfor for kilder/begrundelse. Reshoppers/DBAs/Sellpys/Vinteds egne titler
+# blander frit fx "leggings"/"jeggings", "bukser"/"jeans"/"shorts", samt nu
+# ogsaa fremmedsprogede varianter fra Vinteds internationale saelgere.
+TYPE_SYNONYMS = _build_type_synonyms(_TYPE_CLUSTERS)
 
 GENERIC_BRAND_MARKERS = {"", "ukendt", "unknown", "blandet", "diverse", "no brand"}
 
