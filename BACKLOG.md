@@ -30,6 +30,8 @@ G17   Stand-dropdown (harmoniseret UI)  Size 2        DONE
 G18   Type-matching: fuld taksonomi     Size 6         DONE
 G19   Automatisk periodisk koersel      TBD           DONE
 G20   Type-filter + pris/fragt/total    Size 3        DONE
+G21   Sellpy: reel fragt (login-fri)    Size 3        DONE
+G22   Vinted: login-baseret fragt       Size 5-6      TODO (afventer konto)
 G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
@@ -260,6 +262,47 @@ sker klient-side på det allerede hentede datasæt (ingen ekstra API-kald).
 befolket (bukser/jakke/leggings), "jakke"-filter viste 8/16 kort inkl.
 "Kuling jacka 110" (den svenske titel), total-sortering korrekt stigende
 for kendte totaler; ingen mobil-overflow ved 320px/375px. Size 3.
+
+**G21 (DONE, 2026-07-11) — Sellpy: reel fragt (login-fri).** Esben bad
+om en dyb undersøgelse af om udenlandske Vinted-fund (Polen/Sverige) får
+korrekt beregnet fragt til Danmark. **Fund #1 (Vinted):** BEKRÆFTET at
+kræve login -- `/api/v2/shipments/rates` svarer direkte "Medlemslogin
+påkrævet" fra selve API'et (ikke bare manglende felter). **Fund #2
+(kritisk bug, RETTET):** `bundling.py`s `default_shipping_dkk=39.0`-
+fallback var IKKE land-bevidst -- en rigtig finsk sælger ("annrist", 2
+ægte Reima-jakker) fik den danske indenrigs-antagelse (39 kr) i stedet
+for en realistisk international fragtpris, og bundlen blev selvsikkert
+vist som "betaler sig: True". **Fund #3 (overraskelse, RETTET):** Sellpy
+var IKKE reelt "ukendt fragt" som antaget -- prisen ("Fragt fra 39 DKK")
+er offentligt synlig på annoncesiden, blot client-side React-renderet
+(usynlig for et almindeligt HTTP-kald). Fandt ved at intercepte
+netværkskald at Sellpys frontend selv henter prisen fra et HELT
+OFFENTLIGT, LOGIN-FRIT GraphQL-endpoint
+(`sellpy-parse-prod.herokuapp.com/graphql?_=getFreightAlternatives`) --
+kun en offentlig klient-app-ID + en vilkårlig UUID som "installations-ID"
+kræves, INGEN cookies/session. **Leveret:** `sources/sellpy.py`s
+`SKIP_DETAIL_FETCH` sat til False (var True), ny `fetch_details()` slår
+nu billigste fragtmulighed op pr. kandidat via dette endpoint (samme
+to-fase-arkitektur som Vinteds land-opslag, G16). **Verificeret:** live
+`monitor.run_source()`-kørsel for Sellpy -- 6/6 kandidater korrekt
+beriget med `shipping_price=39.0`. Bundling-fixet (Vinted-delen) er
+udskudt til G22 (kræver login for at få EGNE tal at afveje mod den
+danske antagelse -- uden retvisende data for udenlandske sælgere giver
+det ikke mening at "rette" 39kr-fallbacken til et andet gæt). Size 3.
+
+**G22 (TODO, afventer Esben opretter konto) — Vinted: login-baseret
+fragt.** Eneste resterende platform med reelt utilgængelig fragtdata.
+Esben opretter en DEDIKERET Vinted-konto (samme mønster som DBAs G1 --
+IKKE personlig konto, manuel login, INGEN automatiseret login-forsøg
+nogensinde). Når session-cookien er eksporteret (Cookie-Editor, samme
+flow som `.dba_storage_state.json`), bygges: (a) session-indlæsning i
+`sources/vinted.py` (nyt `storage_state_file`-mønster som DBA); (b) reelt
+fragt-opslag pr. kandidat via `/api/v2/shipments/rates` (nu med gyldig
+session); (c) `bundling.py`s land-blinde 39kr-fallback rettes SAMTIDIG,
+så udenlandske sælgere (Polen/Sverige/Finland, se G16) får en RIGTIG
+fragtpris i stedet for enten den danske antagelse (forkert, nuværende
+adfærd) eller et nyt gæt (ligeså uretvisende). Size 5-6, afhænger af
+hvor stabilt et Vinted-login holder over tid (ukendt indtil testet).
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 

@@ -21,6 +21,9 @@ bundles_fallback.csv
 watch_*
 cloudflare/.wrangler/
 test_hang_diagnostics.log
+# G19: launchd's 5x-dagligt scheduled-task-output
+launchd_stdout.log
+launchd_stderr.log
 
 # Credentials -- kopiér ALDRIG service account-noeglefiler ind i dette repo.
 # config.yaml peger paa credentials-filen med en ABSOLUT sti udenfor repoet
