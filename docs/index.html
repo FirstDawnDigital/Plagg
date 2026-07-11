@@ -115,10 +115,29 @@
     letter-spacing: 0.3px; flex-shrink: 0; white-space: nowrap;
   }
 
+  /* ── Match-filter/sortér ── */
+  #matches-controls {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;
+  }
+  #matches-controls > div { min-width: 0; }
+  #matches-controls label {
+    font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.3px; display: block; margin-bottom: 3px;
+  }
+  #matches-controls select {
+    width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font-size: 14px; background: var(--bg); color: var(--text);
+  }
+
   /* ── Match cards ── */
   .match-card { display: flex; flex-direction: column; gap: 4px; }
   .match-title { font-weight: 700; font-size: 14px; color: var(--blue); text-decoration: none; }
   .match-title:hover { text-decoration: underline; }
+  /* Prislinjen er det primaere sorterings-signal (billigst-foerst inkl.
+     fragt) -- staar derfor tydeligt for sig selv over den oevrige metadata,
+     ikke begravet som blot ét felt blandt mange. */
+  .price-line { font-size: 14px; color: var(--text); }
+  .price-line b { font-weight: 700; }
   .match-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
   .match-meta b { color: var(--text); }
   .stand-warn { color: var(--red); font-weight: 700; }
@@ -305,6 +324,22 @@
 
     <section id="matches-section">
       <h2>Matches</h2>
+      <div id="matches-controls">
+        <div>
+          <label for="matches-type-filter">Type</label>
+          <select id="matches-type-filter">
+            <option value="">Alle typer</option>
+          </select>
+        </div>
+        <div>
+          <label for="matches-sort">Sortér</label>
+          <select id="matches-sort">
+            <option value="rank">Bedste match</option>
+            <option value="total">Billigst (inkl. fragt)</option>
+            <option value="price">Billigst (kun vare)</option>
+          </select>
+        </div>
+      </div>
       <div id="matches-list"><div class="empty-hint">Henter…</div></div>
     </section>
   </div>
@@ -577,10 +612,31 @@
   }
 
   // ── Matches ──────────────────────────────────────────────────────────────
-  function renderMatches(matches) {
+  // Sidst hentede matches gemmes raat, saa filter/sortér kan omberegne
+  // visningen uden et nyt API-kald hver gang brugeren skifter valg.
+  let allMatches = [];
+
+  // Total (vare+fragt) beregnes KUN naar begge dele reelt kendes -- en
+  // ukendt fragtpris (Sellpy/Vinted uden login, se sources-modulerne) maa
+  // ALDRIG stiltiende behandles som 0 kr., det ville vise en falsk total.
+  function matchTotal(m) {
+    const p = m.price, s = m.shipping_price;
+    if (p === null || p === undefined || s === null || s === undefined) return null;
+    return p + s;
+  }
+
+  function priceLineHtml(m) {
+    const total = matchTotal(m);
+    if (total === null) {
+      return `Vare: <b>${fmtKr(m.price)}</b> · Fragt: ukendt`;
+    }
+    return `Vare: ${fmtKr(m.price)} · Fragt: ${fmtKr(m.shipping_price)} · Total: <b>${fmtKr(total)}</b>`;
+  }
+
+  function renderMatchesList(matches) {
     const el = document.getElementById("matches-list");
     if (!matches || matches.length === 0) {
-      el.innerHTML = '<div class="empty-hint">Ingen matches endnu.</div>';
+      el.innerHTML = '<div class="empty-hint">Ingen matches for dette filter.</div>';
       return;
     }
     el.innerHTML = matches.map(m => {
@@ -598,8 +654,8 @@
             ${m.match_rank ? `<span class="badge badge-rank">${escapeHtml(m.match_rank)}</span>` : ""}
             <span class="badge ${sourceBadgeClass(m.source)}">${escapeHtml(m.source || "?")}</span>
           </div>
+          <div class="price-line">${priceLineHtml(m)}</div>
           <div class="match-meta">
-            <span><b>${fmtKr(m.price)}</b></span>
             ${m.size ? `<span>Str. <b>${escapeHtml(m.size)}</b></span>` : ""}
             ${m.brand ? `<span>${escapeHtml(m.brand)}</span>` : ""}
             ${standText ? `<span class="${isBad ? 'stand-warn' : ''}">${isBad ? '⚠ ' : ''}${escapeHtml(standText)}</span>` : ""}
@@ -611,6 +667,50 @@
       `;
     }).join("");
   }
+
+  // Type-filteret bruger 'wishlist_type' (oenskesedlens EGET type-felt),
+  // ikke annoncens raa titeltekst -- saa "jakke"-fund grupperes sammen
+  // uanset om den fundne annonce selv siger "jakke"/"jacka"/"kurtka" (se
+  // G18's fremmedsprogs-daekning i matching.py).
+  function populateMatchesTypeFilter(matches) {
+    const sel = document.getElementById("matches-type-filter");
+    const previous = sel.value;
+    const types = [...new Set(matches.map(m => m.wishlist_type).filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">Alle typer</option>' +
+      types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    if (types.includes(previous)) sel.value = previous;
+  }
+
+  function applyMatchesFilterAndSort() {
+    const typeFilter = document.getElementById("matches-type-filter").value;
+    const sortMode = document.getElementById("matches-sort").value;
+
+    let filtered = typeFilter ? allMatches.filter(m => m.wishlist_type === typeFilter) : allMatches.slice();
+
+    const rankOrder = { "eksakt": 0, "naer match": 1 };
+    const priceOrInf = m => (m.price === null || m.price === undefined) ? Infinity : m.price;
+    const totalOrInf = m => { const t = matchTotal(m); return t === null ? Infinity : t; };
+
+    if (sortMode === "total") {
+      filtered.sort((a, b) => totalOrInf(a) - totalOrInf(b));
+    } else if (sortMode === "price") {
+      filtered.sort((a, b) => priceOrInf(a) - priceOrInf(b));
+    } else {
+      // "rank" -- samme raekkefoelge som backend'ens egen sortering
+      // (matching.match_all()): bedste match foerst, saa billigst.
+      filtered.sort((a, b) => (rankOrder[a.match_rank] ?? 2) - (rankOrder[b.match_rank] ?? 2) || priceOrInf(a) - priceOrInf(b));
+    }
+    renderMatchesList(filtered);
+  }
+
+  function renderMatches(matches) {
+    allMatches = matches || [];
+    populateMatchesTypeFilter(allMatches);
+    applyMatchesFilterAndSort();
+  }
+
+  document.getElementById("matches-type-filter").addEventListener("change", applyMatchesFilterAndSort);
+  document.getElementById("matches-sort").addEventListener("change", applyMatchesFilterAndSort);
 
   // G6-FIX (kritikrunde-fund #3): tidligere blev der IKKE vist nogen
   // fejlbesked hvis Workeren fejlede (fx en 500 fra /api/matches, eller en

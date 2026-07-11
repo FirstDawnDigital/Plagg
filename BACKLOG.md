@@ -29,6 +29,7 @@ G16   Vinted land + polsk-nedprioritet  Size 6-7      DONE
 G17   Stand-dropdown (harmoniseret UI)  Size 2        DONE
 G18   Type-matching: fuld taksonomi     Size 6         DONE
 G19   Automatisk periodisk koersel      TBD           DONE
+G20   Type-filter + pris/fragt/total    Size 3        DONE
 G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
@@ -239,6 +240,26 @@ til at afspejle det faktiske 5×-skema i stedet for det tidligere
 `monitor.py`-kørsler (en periodisk + en manuel "Kør nu" der rammer
 samtidig) er ikke et fuldt distribueret lock, men generations-swappet
 håndterer det pænere end en simpel overskrivning ville.
+
+**G20 (DONE, 2026-07-11) — Type-filter + tydelig pris/fragt/total.**
+Esben bad om (a) en filtermekanisme i webappen så man fx kan se jakker
+samlet, og (b) tydelig vare-/fragt-/totalpris så filteret kan bruges til
+at finde det billigste fund. **Leveret (kun `docs/index.html`, ingen
+backend-ændring):** ny "Type"-dropdown filtrerer på `wishlist_type`
+(ønskesedlens EGET type-felt, ikke annoncens rå titeltekst) -- så et
+"jakke"-filter grupperer korrekt uanset om fundet selv hedder "jakke"/
+"jacka"/"kurtka" (genbruger G18s fremmedsprogsdækning uden ekstra
+arbejde). Ny "Sortér"-dropdown: Bedste match (uændret backend-
+rækkefølge) / Billigst inkl. fragt / Billigst kun vare. Hvert match-kort
+viser nu en tydelig prislinje: "Vare: X kr. · Fragt: Y kr. · Total: Z
+kr." -- eller "Fragt: ukendt" når kilden ikke har fragtdata (Sellpy/
+Vinted uden login, se deres moduler); total beregnes ALDRIG ved at
+antage 0 kr. fragt, kun når begge dele reelt kendes. Alt filter/sortér
+sker klient-side på det allerede hentede datasæt (ingen ekstra API-kald).
+**Verificeret:** live mod produktions-API -- type-dropdown korrekt
+befolket (bukser/jakke/leggings), "jakke"-filter viste 8/16 kort inkl.
+"Kuling jacka 110" (den svenske titel), total-sortering korrekt stigende
+for kendte totaler; ingen mobil-overflow ved 320px/375px. Size 3.
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 
