@@ -337,12 +337,16 @@ paa tvaers af de to processer pt.).
   ovenfor. Ingen automatisk fornyelse; kilden stopper og logger tydeligt
   i stedet for at fejle stille, hvis sessionen ser ugyldig ud.
 
-## Periodisk kørsel med launchd (2× dagligt, morgen + aften)
+## Periodisk kørsel med launchd (5× dagligt: 06/10/14/18/22)
 
-**IKKE installeret automatisk** (maskine-specifik handling) — dokumenteret
-her til Esben selv at aktivere. Samme mønster som PA SPEAKERS-arkivets README.
-
-Opret `~/Library/LaunchAgents/com.local.personal-shopper.plist`:
+**G19 (2026-07-11): INSTALLERET og AKTIV** på denne maskine -- se
+BACKLOG.md's G19 for baggrunden (Esbens kone fandt Vinted-annoncer der
+ikke dukkede op, delvist fordi der aldrig kørte noget automatisk mellem
+manuelle "Kør nu"-tryk). Plist-filen ligger på
+`~/Library/LaunchAgents/com.local.personal-shopper.plist` med de
+absolutte stier til DENNE maskines `.venv`/repo -- kopiér/tilpas stierne
+hvis systemet flyttes til en anden maskine, samme mønster som PA
+SPEAKERS-arkivets README.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -363,13 +367,31 @@ Opret `~/Library/LaunchAgents/com.local.personal-shopper.plist`:
   <array>
     <dict>
       <key>Hour</key>
-      <integer>8</integer>
+      <integer>6</integer>
       <key>Minute</key>
       <integer>0</integer>
     </dict>
     <dict>
       <key>Hour</key>
-      <integer>20</integer>
+      <integer>10</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>14</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>18</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>22</integer>
       <key>Minute</key>
       <integer>0</integer>
     </dict>
@@ -392,6 +414,12 @@ Deaktivér:
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.local.personal-shopper.plist
+```
+
+Tjek at den er indlæst:
+
+```bash
+launchctl list | grep personal-shopper
 ```
 
 ## Udvidelse til flere platforme (senere branch)

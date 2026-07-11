@@ -28,7 +28,7 @@ G6    Stand-normalisering (m. punkt 3)  Size 4-5      DONE
 G16   Vinted land + polsk-nedprioritet  Size 6-7      DONE
 G17   Stand-dropdown (harmoniseret UI)  Size 2        DONE
 G18   Type-matching: fuld taksonomi     Size 6         DONE
-G19   Automatisk periodisk koersel      TBD           TODO (afventer Esben)
+G19   Automatisk periodisk koersel      TBD           DONE
 G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
@@ -218,21 +218,27 @@ genkendt type-ord (fx "Vindfleece" uden "jakke"/"jacka"-stamme) fanges
 stadig ikke -- diminishing returns ift. risiko for falske positiver ved
 at udvide yderligere. Size 6.
 
-**G19 (TODO, afventer Esben) — Ingen automatisk periodisk kørsel.**
-Sideeffekt-fund fra samme undersøgelse: `launchctl`/`crontab` viser INGEN
-planlagt opgave for Personal Shopper overhovedet -- README dokumenterer
-eksplicit at det 2x-dagligt scheduled-task ALDRIG er installeret
-("IKKE installeret automatisk"). Systemet har derfor ALTID udelukkende
-kørt når nogen manuelt trykker "Kør nu" (Sheet eller webapp) -- de to
-`trigger_watcher.py`-processer der kører nu er startet ad-hoc under
-udviklingsarbejdet, ikke en permanent systemtjeneste der overlever en
-genstart. Konkret observeret: sidste kørsel var kl. 00:08, tjekket igen
-kl. 08:45 -- 8,5 timers datastilstand uden nogen har trykket "Kør nu".
-Dette forklarer sandsynligvis (helt eller delvist) hvorfor konens Vinted-
-fund ikke var synlige. **Kræver Esbens beslutning** (installere en
-launchd-tjeneste er en systemniveau-ændring): hvor ofte skal der scannes
-automatisk, og skal det være launchd (README har et færdigt
-KeepAlive-eksempel) eller en anden mekanisme?
+**G19 (DONE, 2026-07-11) — Automatisk periodisk kørsel.** Sideeffekt-fund
+fra G18-undersøgelsen: `launchctl`/`crontab` viste INGEN planlagt opgave
+for Personal Shopper overhovedet -- README dokumenterede eksplicit at
+det 2x-dagligt scheduled-task ALDRIG var installeret ("IKKE installeret
+automatisk"). Systemet havde derfor ALTID udelukkende kørt når nogen
+manuelt trykkede "Kør nu" -- konkret observeret: sidste kørsel kl. 00:08,
+tjekket igen kl. 08:45 -- 8,5 timers datastilstand uden nogen har
+trykket "Kør nu". Forklarer sandsynligvis (helt eller delvist) hvorfor
+konens Vinted-fund ikke var synlige. **Leveret:** Esben valgte 5×
+dagligt (06/10/14/18/22). `~/Library/LaunchAgents/com.local.personal-
+shopper.plist` oprettet (StartCalendarInterval med 5 tidspunkter, minut
+0), valideret med `plutil -lint` og indlæst med `launchctl load` --
+bekræftet registreret via `launchctl list`. Kører `monitor.py` direkte
+(ikke `trigger_watcher.py` -- den er til manuelle "Kør nu"-tryk, denne
+er en uafhængig periodisk kørsel), skriver til BÅDE Sheets og Turso jf.
+`config.yaml`s `output.targets`. README.md's launchd-sektion opdateret
+til at afspejle det faktiske 5×-skema i stedet for det tidligere
+2×-eksempel. Kendt, accepteret risiko (uændret fra G5): to overlappende
+`monitor.py`-kørsler (en periodisk + en manuel "Kør nu" der rammer
+samtidig) er ikke et fuldt distribueret lock, men generations-swappet
+håndterer det pænere end en simpel overskrivning ville.
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 
