@@ -224,19 +224,29 @@ def _looks_like_bot_wall(response, page) -> bool:
 
 
 def _session_looks_logged_in(page) -> bool:
-    """Tjekker for login-only-navigation ('Min DBA'/'Beskeder'-links til
-    /my-page og /messages i topbaren) -- BEKRAEFTET at disse links ligger
-    inde i <finn-topbar>'s shadow-root, saa vi bruger Playwrights EGEN
-    locator (som piercer shadow-DOM som standard), IKKE page.content() eller
+    """Tjekker for login-only-navigation ('Min DBA'-link til /my-page i
+    topbaren) -- BEKRAEFTET at dette link ligger inde i <finn-topbar>'s
+    shadow-root, saa vi bruger Playwrights EGEN locator (som piercer
+    shadow-DOM som standard), IKKE page.content() eller
     document.querySelectorAll (native DOM-API'er ser IKKE ind i et
     shadow-root -- bekraeftet gav 0 traeff i test selvom en logget-ind
     session rent faktisk viste linkene visuelt, se BACKLOG.md's G1-fund).
+
+    RETTELSE (2026-07-11, live-fund under en "hvor paalideligt er dette
+    health-check reelt"-simulation): '/messages'-linket er IKKE laengere
+    et paalideligt login-signal -- DBA viser det nu ogsaa til ANONYME
+    besoegende (bekraeftet: count()=1 UDEN nogen session overhovedet).
+    Det oprindelige OR-tjek ('/my-page' ELLER '/messages') gav derfor
+    et FALSK POSITIVT "stadig logget ind"-resultat selv med en helt
+    udloebet/manglende session. '/my-page' alene ER stadig paalideligt
+    (bekraeftet: 0 traeff uden login, 1 traeff MED login, teksten
+    "Min DBA") -- tjekker derfor KUN paa den nu.
 
     Returnerer False hvis sessionen ser udloebet/ugyldig ud -- IKKE et
     signal om at proeve at logge ind selv (det skal eskaleres til Esben,
     se modulets docstring og BACKLOG.md)."""
     try:
-        return page.locator('a[href*="/my-page"], a[href*="/messages"]').count() > 0
+        return page.locator('a[href*="/my-page"]').count() > 0
     except Exception:
         return False
 

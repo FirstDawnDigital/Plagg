@@ -37,5 +37,9 @@ google_credentials*.json
 .dba_storage_state.json
 .dba_session/
 
+# G22: Vinted-login-session (dedikeret konto). Aldrig i git, indeholder
+# auth-tokens (access_token_web/refresh_token_web/v_sid/datadome m.fl.).
+.vinted_storage_state.json
+
 # G5-hemmeligheder (Turso/Cloudflare) -- aldrig i git.
 secrets.env
