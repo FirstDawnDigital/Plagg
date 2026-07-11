@@ -285,10 +285,25 @@ kræves, INGEN cookies/session. **Leveret:** `sources/sellpy.py`s
 nu billigste fragtmulighed op pr. kandidat via dette endpoint (samme
 to-fase-arkitektur som Vinteds land-opslag, G16). **Verificeret:** live
 `monitor.run_source()`-kørsel for Sellpy -- 6/6 kandidater korrekt
-beriget med `shipping_price=39.0`. Bundling-fixet (Vinted-delen) er
-udskudt til G22 (kræver login for at få EGNE tal at afveje mod den
-danske antagelse -- uden retvisende data for udenlandske sælgere giver
-det ikke mening at "rette" 39kr-fallbacken til et andet gæt). Size 3.
+beriget med `shipping_price=39.0`. **Fund #2-bugget rettet med det
+samme** (kræver ikke Vinted-login, kun den allerede kendte
+`seller_country`, se G16): `bundling.py`s `build_bundles()` bruger nu
+IKKE `default_shipping_dkk` for en kendt udenlandsk sælger uden reel
+fragtdata -- `shipping_dkk=None`, `bundle_worth_it=False` (konservativt,
+ikke et gæt), ny `shipping_unknown_foreign`-flag. Sorterings-crash
+(`-None`) i samme funktion fanget og rettet undervejs (usikre bundles
+sorteres bagerst, ikke først). `sheets_output.py` fik `_or_blank()` +
+`_bundle_worth_it_text()` (viser "USIKKERT (udenlandsk sælger)" i stedet
+for et misvisende "NEJ"); `docs/index.html` fik en ny grå
+"Fragt ukendt"-tag (hverken "Betaler sig" eller "Kun 1 item" er sandt
+for en 2+-vares bundle med ukendt fragt). **Verificeret:** genkørt den
+finske "annrist"-bundle -- fragt/betaler-sig gik fra det forkerte
+39kr/True til korrekt None/False; regressionstestet at KENDT fragt
+(dansk sælger) og UKENDT LAND (Reshopper, intet `seller_country`-felt
+overhovedet) begge forbliver uændrede; blandet sortering uden crash;
+isoleret Playwright-test af `renderBundles()` med syntetiske data
+bekræftede begge visningstilstande. **Vinted-delen** (rigtige tal
+i stedet for "ukendt") afventer stadig G22's login. Size 3.
 
 **G22 (TODO, afventer Esben opretter konto) — Vinted: login-baseret
 fragt.** Eneste resterende platform med reelt utilgængelig fragtdata.

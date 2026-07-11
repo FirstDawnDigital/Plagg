@@ -71,21 +71,48 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
             continue
 
         shipping_values = [m.get("shipping_price") for m in items if m.get("shipping_price") is not None]
+        # G21-FIX (kritisk fund): default_shipping_dkk er en DANSK indenrigs-
+        # antagelse -- den er BEKRAEFTET forkert for kendte udenlandske
+        # saelgere (live-testet mod en rigtig finsk saelger, se BACKLOG.md's
+        # G21). Uden en rigtig Vinted-login-session (G22) har vi INTET
+        # paalideligt tal for disse -- vi GAETTER derfor IKKE et andet tal,
+        # vi viser aerligt "ukendt" fremfor et selvsikkert men sandsynligt
+        # forkert "betaler sig"-facit (samme princip som G6/G16/G20).
+        known_countries = {m.get("seller_country") for m in items if m.get("seller_country")}
+        is_known_foreign = bool(known_countries) and known_countries != {"DK"}
+
         if shipping_values:
             # Fragt er pr. ORDRE, ikke pr. item -- vi antager saelgerens fragtpris
             # er ens paa tvaers af egne annoncer. Bruger den hoejeste observerede
             # vaerdi som et konservativt (ikke-optimistisk) bud paa den reelle pris.
             shipping = max(shipping_values)
             shipping_is_assumed = False
+        elif is_known_foreign:
+            shipping = None
+            shipping_is_assumed = False
         else:
             shipping = default_shipping_dkk
             shipping_is_assumed = True
 
         total_item_price = sum(m["price"] for m in items)
-        total_with_shipping = total_item_price + shipping
-        effective_price_per_item = round(total_with_shipping / count, 2)
-        alone_price_per_item = round(sum(m["price"] + shipping for m in items) / count, 2)
-        savings_per_item = round(alone_price_per_item - effective_price_per_item, 2)
+        if shipping is not None:
+            total_with_shipping = round(total_item_price + shipping, 2)
+            effective_price_per_item = round(total_with_shipping / count, 2)
+            alone_price_per_item = round(sum(m["price"] + shipping for m in items) / count, 2)
+            savings_per_item = round(alone_price_per_item - effective_price_per_item, 2)
+            bundle_worth_it = count >= 2
+        else:
+            # Ukendt fragt for en kendt udenlandsk saelger -- INGEN af disse
+            # tal kan beregnes aerligt, og "betaler sig" forbliver bevidst
+            # False (ikke None) saa eksisterende booleanske forbrugere
+            # (Sheets/webapp/TL;DR-taelling) ikke kraever aendring for at
+            # haandtere en tredje tilstand -- konservativt "nej" er sikrere
+            # end at fejlagtigt paastaa et "ja" vi ikke kan bakke op med tal.
+            total_with_shipping = None
+            effective_price_per_item = None
+            alone_price_per_item = None
+            savings_per_item = None
+            bundle_worth_it = False
 
         bundles.append({
             "seller_key": seller_key,
@@ -97,11 +124,12 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
             "total_item_price": round(total_item_price, 2),
             "shipping_dkk": shipping,
             "shipping_is_assumed": shipping_is_assumed,
-            "total_with_shipping": round(total_with_shipping, 2),
+            "shipping_unknown_foreign": is_known_foreign and shipping is None,
+            "total_with_shipping": total_with_shipping,
             "effective_price_per_item": effective_price_per_item,
             "alone_price_per_item": alone_price_per_item,
             "savings_per_item": savings_per_item,
-            "bundle_worth_it": count >= 2,
+            "bundle_worth_it": bundle_worth_it,
             # Lokal afhentning-bonus: KUN naar vi har positiv bekraeftelse af 0-kr
             # fragt fra schema.org-dataen -- manglende fragt-info er IKKE det samme
             # som bekraeftet gratis afhentning (kan ogsaa vaere manglende data).
@@ -116,7 +144,14 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
     # stadig i all_matches / Matches-visningen.
     sellers_with_match = len(bundles)
     bundles = [b for b in bundles if b["item_count"] >= 2]
-    bundles.sort(key=lambda b: (-b["savings_per_item"], -b["item_count"]))
+    # G21-FIX: savings_per_item kan nu vaere None (kendt udenlandsk saelger,
+    # ukendt fragt) -- disse sorteres bagerst (ikke foerst pga. -None-crash),
+    # da vi netop IKKE kan bekraefte en besparelse for dem.
+    bundles.sort(key=lambda b: (
+        b["savings_per_item"] is None,
+        -b["savings_per_item"] if b["savings_per_item"] is not None else 0,
+        -b["item_count"],
+    ))
     logger.info(
         "Bundling: %d saelger(e) med mindst ét match, heraf %d ægte bundle(s) (2+ items)",
         sellers_with_match, len(bundles),

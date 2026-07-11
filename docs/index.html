@@ -93,6 +93,10 @@
   }
   .worth-it-tag.yes { background: var(--green-bg); color: var(--green); }
   .worth-it-tag.no  { background: var(--yellow-bg); color: var(--yellow); }
+  /* G21: udenlandsk saelger, ukendt fragt -- hverken "betaler sig" eller
+     "kun 1 item" er sandt/relevant her (kan sagtens vaere 2+ items) --
+     neutral graa i stedet for at gaette et facit vi ikke kan bakke op. */
+  .worth-it-tag.unknown { background: var(--border); color: var(--muted); }
   .bundle-stats {
     display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted);
     margin-bottom: 8px;
@@ -574,7 +578,24 @@
     }
     el.innerHTML = bundles.map(b => {
       const items = Array.isArray(b.items) ? b.items : [];
+      // G21-FIX: en kendt udenlandsk saelger uden login-adgang til fragt
+      // (Vinted, se BACKLOG.md's G21/G22) faar IKKE den danske 39kr-
+      // antagelse -- shipping_dkk er da null, og hverken "betaler sig"
+      // (kan sagtens vaere 2+ items) eller "kun 1 item" (kan ogsaa vaere
+      // 2+) er et daekkende label.
+      const shippingUnknown = b.shipping_dkk === null || b.shipping_dkk === undefined;
       const worthIt = !!b.bundle_worth_it;
+      let worthItLabel, worthItClass;
+      if (shippingUnknown) {
+        worthItLabel = "Fragt ukendt";
+        worthItClass = "unknown";
+      } else if (worthIt) {
+        worthItLabel = "Betaler sig";
+        worthItClass = "yes";
+      } else {
+        worthItLabel = "Kun 1 item";
+        worthItClass = "no";
+      }
       const itemLinks = items.map(it => {
         const label = escapeHtml(it.title || it.brand || it.size || "annonce");
         const price = it.price != null ? ` — ${fmtKr(it.price)}` : "";
@@ -597,13 +618,15 @@
           <div class="card-top-row">
             <span class="seller-name">${escapeHtml(b.seller_name || "ukendt sælger")}</span>
             <span class="badge ${sourceBadgeClass(b.source)}">${escapeHtml(b.source || "?")}</span>
-            <span class="worth-it-tag ${worthIt ? 'yes' : 'no'}">${worthIt ? 'Betaler sig' : 'Kun 1 item'}</span>
+            <span class="worth-it-tag ${worthItClass}">${worthItLabel}</span>
           </div>
           <div class="bundle-stats">
             <span>${b.item_count} stk.</span>
-            <span><b>${fmtKr(b.effective_price_per_item)}</b>/stk.</span>
-            <span>Besparelse: <b>${fmtKr(b.savings_per_item)}</b>/stk.</span>
-            <span>Fragt: ${fmtKr(b.shipping_dkk)}${b.shipping_is_assumed ? ' (antaget)' : ''}</span>
+            ${shippingUnknown
+              ? `<span>Fragt: ukendt (udenlandsk sælger, se detaljer)</span>`
+              : `<span><b>${fmtKr(b.effective_price_per_item)}</b>/stk.</span>
+                 <span>Besparelse: <b>${fmtKr(b.savings_per_item)}</b>/stk.</span>
+                 <span>Fragt: ${fmtKr(b.shipping_dkk)}${b.shipping_is_assumed ? ' (antaget)' : ''}</span>`}
           </div>
           <div class="bundle-items">${itemLinks}</div>
         </div>

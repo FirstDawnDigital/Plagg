@@ -98,6 +98,24 @@ def _short_item_ref(m: dict) -> str:
     return f"…{ref[-6:]}" if len(ref) > 6 else ref
 
 
+def _or_blank(value):
+    """G21-FIX: bundle-oekonomifelter (total_with_shipping m.fl.) kan nu
+    vaere None (kendt udenlandsk saelger, ukendt fragt uden Vinted-login,
+    se BACKLOG.md's G21/G22) -- dict.get(key, "") giver IKKE en tom
+    streng her, fordi noeglen FINDES (blot med vaerdien None), saa vi maa
+    tjekke eksplicit i stedet for at stole paa .get()'s default-parameter."""
+    return "" if value is None else value
+
+
+def _bundle_worth_it_text(b: dict) -> str:
+    """G21-FIX: 'NEJ' ville fejlagtigt paastaa at bundlen BEKRAEFTET ikke
+    betaler sig -- for en kendt udenlandsk saelger med ukendt fragt (kan
+    sagtens vaere 2+ items) er sandheden at vi reelt IKKE VED det."""
+    if b.get("shipping_dkk") is None and b.get("item_count", 0) >= 2:
+        return "USIKKERT (udenlandsk sælger)"
+    return "JA" if b.get("bundle_worth_it") else "NEJ"
+
+
 def _display_stand(stand: str) -> str:
     """H3: praefikser en tydelig advarsel foran negative stand-labels (fx
     'Defekt, kan laves') saa de ikke fremstaar ligevaerdige med god stand i
@@ -472,11 +490,11 @@ def write_bundles(spreadsheet, bundles: list[dict], now_str: str) -> int:
             *link_cells,
             b.get("total_item_price", ""),
             _format_kr(b.get("shipping_dkk"), note=" (antaget)" if b.get("shipping_is_assumed") else ""),
-            b.get("total_with_shipping", ""),
-            b.get("effective_price_per_item", ""),
-            b.get("alone_price_per_item", ""),
-            b.get("savings_per_item", ""),
-            "JA" if b.get("bundle_worth_it") else "NEJ",  # H5: konsekvent case
+            _or_blank(b.get("total_with_shipping")),
+            _or_blank(b.get("effective_price_per_item")),
+            _or_blank(b.get("alone_price_per_item")),
+            _or_blank(b.get("savings_per_item")),
+            _bundle_worth_it_text(b),  # H5: konsekvent case
             "JA" if b.get("local_pickup_bonus") else "NEJ",
             now_str,
         ])
@@ -544,9 +562,9 @@ def write_local_csv_fallback(matches: list[dict], bundles: list[dict], first_see
                 *link_cells,
                 b.get("total_item_price", ""),
                 _format_kr(b.get("shipping_dkk"), note=" (antaget)" if b.get("shipping_is_assumed") else ""),
-                b.get("total_with_shipping", ""), b.get("effective_price_per_item", ""),
-                b.get("alone_price_per_item", ""), b.get("savings_per_item", ""),
-                "JA" if b.get("bundle_worth_it") else "NEJ",
+                _or_blank(b.get("total_with_shipping")), _or_blank(b.get("effective_price_per_item")),
+                _or_blank(b.get("alone_price_per_item")), _or_blank(b.get("savings_per_item")),
+                _bundle_worth_it_text(b),
                 "JA" if b.get("local_pickup_bonus") else "NEJ",
                 now_str,
             ])
