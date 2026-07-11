@@ -165,6 +165,39 @@
     font-size: 14px; background: var(--bg); color: var(--text);
   }
   #wl-form input:focus, #wl-form select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px #2563eb22; }
+
+  /* Info-ikon m. stand-mapping-tabel -- hover paa desktop, tap paa mobil
+     (se JS-toggle nedenfor). Ikonet ligger INDE i <label for="wl-stand">,
+     saa klik paa selve ⓘ'et boer IKKE aabne select'en -- JS'en kalder
+     e.preventDefault()+stopPropagation() for at forhindre det.
+     VIGTIGT (mobil-laert af tidligere overflow-bug, se BACKLOG.md's H-serie):
+     tooltippen er ANKRET til '.stand-field' (HELE feltets bredde, left:0;
+     right:0), IKKE til selve det lille ⓘ-ikon -- et ikon-ankret popover med
+     en fast bredde ville overskride skaermkanten paa smalle mobilskaerme,
+     fordi ikonets vandrette position varierer med labelteksten. */
+  .stand-field { position: relative; }
+  .info-icon {
+    display: inline-block; margin-left: 4px;
+    color: var(--blue); font-weight: 700; cursor: pointer;
+    text-transform: none; letter-spacing: normal;
+  }
+  .info-tooltip {
+    display: none; position: absolute; z-index: 50; top: 100%; left: 0; right: 0;
+    margin-top: 4px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    font-size: 11px; font-weight: normal; text-transform: none; letter-spacing: normal;
+    color: var(--text);
+  }
+  .info-icon:hover .info-tooltip, .info-icon.open .info-tooltip { display: block; }
+  .info-tooltip-scroll { overflow-x: auto; }
+  .info-tooltip table { border-collapse: collapse; width: 100%; }
+  .info-tooltip th, .info-tooltip td {
+    padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .info-tooltip th { color: var(--muted); }
+  .info-tooltip p { margin: 8px 0 0; color: var(--muted); white-space: normal; }
   #wl-add-btn {
     grid-column: 1 / -1; margin-top: 4px; padding: 10px; border: none; border-radius: 8px;
     background: var(--green); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
@@ -229,13 +262,35 @@
           <label for="wl-pris">Maks. pris (kr.) — påkrævet</label>
           <input id="wl-pris" type="number" min="1" step="1" placeholder="fx 150">
         </div>
-        <div class="full">
-          <label for="wl-stand">Min. stand (valgfrit)</label>
+        <div class="full stand-field">
+          <label for="wl-stand">
+            Min. stand (valgfrit)
+            <span class="info-icon" tabindex="0" role="button" aria-label="Sådan matcher stand på tværs af platforme">
+              ⓘ
+              <div class="info-tooltip">
+                <div class="info-tooltip-scroll">
+                  <table>
+                    <thead>
+                      <tr><th>Tier</th><th>Reshopper</th><th>DBA</th><th>Sellpy</th><th>Vinted</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>Ny</td><td>Helt ny</td><td>Helt ny (uåbnet/prismærke)</td><td>Nyt</td><td>Ny m. prismærker</td></tr>
+                      <tr><td>Næsten ny</td><td>Næsten som ny · Istandsat</td><td>Som ny (ingen brugsspor)</td><td>Meget god</td><td>Meget god · Rigtig god</td></tr>
+                      <tr><td>God</td><td>God, men brugt</td><td>Brugt – men i god stand</td><td>God</td><td>God</td></tr>
+                      <tr><td>Brugt</td><td>Brugt (ukendt grad)</td><td>–</td><td>Acceptabelt</td><td>Rimelig/Tilfredsstillende</td></tr>
+                      <tr><td>Defekt</td><td>Defekt, kan laves</td><td>–</td><td>–</td><td>–</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p>Et valg som "God" accepterer også Næsten som ny og Ny – aldrig ringere.</p>
+              </div>
+            </span>
+          </label>
           <select id="wl-stand">
             <option value="">Alle stande</option>
             <option value="Ny">Ny</option>
             <option value="Næsten som ny">Næsten som ny</option>
-            <option value="God">God</option>
+            <option value="God" selected>God</option>
             <option value="Brugt">Brugt</option>
           </select>
         </div>
@@ -640,6 +695,23 @@
       el.innerHTML = '<div class="empty-hint">Kunne ikke hente ønskeseddel.</div>';
     }
   }
+
+  // Info-ikon ved "Min. stand": hover aabner paa desktop (ren CSS), tap
+  // toggler en '.open'-klasse for mobil (ingen hover-event paa touch).
+  // e.preventDefault()+stopPropagation() forhindrer at klikket bobler op
+  // til den omsluttende <label for="wl-stand"> og aabner select'en.
+  document.querySelectorAll(".info-icon").forEach(icon => {
+    icon.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const wasOpen = icon.classList.contains("open");
+      document.querySelectorAll(".info-icon.open").forEach(i => i.classList.remove("open"));
+      if (!wasOpen) icon.classList.add("open");
+    });
+  });
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".info-icon.open").forEach(i => i.classList.remove("open"));
+  });
 
   document.getElementById("wl-form").addEventListener("submit", async (e) => {
     e.preventDefault();
