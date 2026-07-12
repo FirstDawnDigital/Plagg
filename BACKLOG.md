@@ -19,20 +19,25 @@ live 2026-07-10/11, flere koersler om dagen, 14-25 matches typisk).
 
 ## Aktiv backlog (næste øverst)
 
+**Rækkefølge pr. 2026-07-12:** Esben har eksplicit bedt om at starte med de
+TEKNISKE punkter (G23-G29, hærdning ift. `scraper-boilerplate`-evalueringen +
+sti-flytningens fund) før business-features (G22/G30 + G2-G4) tages op igen.
+
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
-G14   Vinted-fix: priming-retry+badges  Size 3        DONE
-G15   Størrelse: eksakt/op, aldrig ned  Size 2        DONE
-G6    Stand-normalisering (m. punkt 3)  Size 4-5      DONE
-G16   Vinted land + polsk-nedprioritet  Size 6-7      DONE
-G17   Stand-dropdown (harmoniseret UI)  Size 2        DONE
-G18   Type-matching: fuld taksonomi     Size 6         DONE
-G19   Automatisk periodisk koersel      TBD           DONE
-G20   Type-filter + pris/fragt/total    Size 3        DONE
-G21   Sellpy: reel fragt (login-fri)    Size 3        DONE
-G22   Vinted: login-baseret fragt       Size 5-6      TODO (afventer konto)
-G4    Region-filtrering (afhentning)    WSJF 3.5      NÆSTE
+G23   Sti-flytning (~/CC/) + trigger-   Size 3        DONE
+      watcher launchd-konsolidering
+G24   Healthcheck-ping (healthchecks.io)Size 1        NÆSTE
+G25   Rigtig auth (worker.js)           Size 5-6      TODO (afventer valg)
+G26   Lås CORS                          Size 1        TODO (afventer valg)
+G27   Turso-transport-swap (libsql)     Size 3-4      TODO (afventer OK)
+G28   Secrets-scanning (gitleaks)       Size 2        TODO
+G29   matching/pricing -> scraper-core  Size 2        TODO (lav prioritet)
+----  --------------------------------  ------------  --------
+G22   Vinted: login-baseret fragt       Size 5-6      DELVIST BLOKERET
+G30   Vinted-fragt: manuelt tjek-flow   TBD           TODO (business #1)
+G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
 ```
@@ -313,19 +318,134 @@ isoleret Playwright-test af `renderBundles()` med syntetiske data
 bekræftede begge visningstilstande. **Vinted-delen** (rigtige tal
 i stedet for "ukendt") afventer stadig G22's login. Size 3.
 
-**G22 (TODO, afventer Esben opretter konto) — Vinted: login-baseret
-fragt.** Eneste resterende platform med reelt utilgængelig fragtdata.
-Esben opretter en DEDIKERET Vinted-konto (samme mønster som DBAs G1 --
-IKKE personlig konto, manuel login, INGEN automatiseret login-forsøg
-nogensinde). Når session-cookien er eksporteret (Cookie-Editor, samme
-flow som `.dba_storage_state.json`), bygges: (a) session-indlæsning i
-`sources/vinted.py` (nyt `storage_state_file`-mønster som DBA); (b) reelt
-fragt-opslag pr. kandidat via `/api/v2/shipments/rates` (nu med gyldig
-session); (c) `bundling.py`s land-blinde 39kr-fallback rettes SAMTIDIG,
-så udenlandske sælgere (Polen/Sverige/Finland, se G16) får en RIGTIG
-fragtpris i stedet for enten den danske antagelse (forkert, nuværende
-adfærd) eller et nyt gæt (ligeså uretvisende). Size 5-6, afhænger af
-hvor stabilt et Vinted-login holder over tid (ukendt indtil testet).
+**G22 (DELVIST BLOKERET, 2026-07-11/12) — Vinted: login-baseret fragt.**
+Esben oprettede en dedikeret Vinted-konto og eksporterede en session
+(`.vinted_storage_state.json`, gitignored, samme mønster som DBA).
+Bekræftet: sessionen ER reelt logget ind. MEN selve fragtberegningen
+sker IKKE ved almindeligt sidebesøg -- kun ved reel købsintention. At
+klikke "Køb nu" (Playwright, automatiseret) udløste `POST /api/v2/
+purchases/checkout/build` -> **403 + DataDome CAPTCHA-udfordring**,
+SELV MED gyldig login. Samme principielle grænse som DBAs login-
+CAPTCHA: automatisering stopper her, ubetinget.
+En Opus-research-runde (selvstændig agent) undersøgte grundigt om en
+lovlig, ikke-CAPTCHA-vej findes: Vinteds egen prisliste har INGEN
+fragttabel; hele det undersøgte open source Vinted-scraper-økosystem
+(4 populære biblioteker) har samme begrænsning; `routes.vintedgo.com`
+(Vinteds login-frie fragtlabel-værktøj) blev testet direkte og
+dækker slet ikke Polen/Sverige/Finland/Danmark (kun FR/IT/ES/BE/NL/PT/
+GB, bekræftet fra sidens egne data). **Konklusion: intet automatiseret,
+lovligt alternativ findes.** Et forsvarligt ESTIMAT blev dog fundet:
+Vinteds egen integrerede grænseoverskridende fragt koster typisk
+€6-10 (~45-75 kr.) for en lille/mellem pakke -- IKKE detail-
+fragtpriser (PostNord-listepriser er 134-200 kr., ville overvurdere
+massivt). Automatiseret opslag droppes; se G30 for den
+menneske-i-loopet-løsning Esben foreslog i stedet. Size 5-6 (brugt).
+
+**G23 (DONE, 2026-07-12) — Sti-flytning (`~/CC/`-konvention) +
+trigger_watcher-launchd-konsolidering.** Projektet flyttet fra
+`/Users/server/# Claude tmux/PLAGG/personal-shopper` til
+`/Users/server/CC/PLAGG/personal-shopper` (Esben-drevet, `#`-tegnet i
+den gamle sti gav bekræftede Vitest/shell-problemer på tværs af
+projekter). **Fund + rettet:** (1) `config.yaml`s `google_sheets.
+credentials_file` pegede stadig på den GAMLE, nu-slettede absolutte
+sti til service account-nøglen i søsterprojektet `ejendompython` --
+bekræftet at dette FAKTISK havde ramt mindst 2 planlagte kørsler
+(18:01 og 22:01) som stille faldt tilbage til lokale CSV-filer i
+stedet for at skrive til det rigtige Sheet (Turso/webappen var
+upåvirket, uafhængige try/except-blokke). Rettet til den nye
+`~/CC/CCBOILERPLATE/OLD REPOS/ejendompython/google_credentials.json`
+-- verificeret direkte (`get_sheets_client()` + `open_by_key()`) OG
+via en frisk kørsel der korrekt skrev til det ægte Sheet. (2) To
+`trigger_watcher.py`-processer kørte som ikke-superviserede manuelle
+terminal-processer (én pr. sheet/turso-kilde) -- begge fulgte cwd
+korrekt med ved flytningen (macOS), men havde begge fejlet i deres
+logs undervejs (stale sti-referencer / forbigående DNS-fejl). Begge
+konverteret til RIGTIGE launchd-jobs (`com.local.personal-shopper-
+trigger` + `-turso`, KeepAlive+RunAtLoad, adskilte log-stier) --
+overlever nu crashes/genstart, ligesom `com.local.personal-shopper`
+(G19) allerede gjorde. Begge kilder BEVARES parallelt (Sheets-sporet
+røres aldrig uden eksplicit instruks). Verificeret: begge nye
+launchd-jobs kører, ingen fejl i logs efter genstart.
+
+**G24 (NÆSTE) — Healthcheck-ping.** Fra `scraper-boilerplate`s
+`scraper_core.healthcheck` (verificeret: to rene no-op-safe GET-kald,
+`ping_success()`/`ping_fail()`, ingen skjulte afhængigheder). Tilføjes
+additivt ved `monitor.py`s eksisterende terminal-grene
+(`write_final_status()`). **Kræver Esben:** oprette et NYT
+healthchecks.io-check specifikt til PLAGG (ekstern SaaS-konto/check,
+kan ikke gøres af Claude) og give URL'en til `secrets.env`. Size 1.
+
+**G25 (TODO, afventer valg) — Rigtig auth i `worker.js`.** I dag: ét
+delt `X-API-Key`, synligt for enhver i DevTools, ingen session, ingen
+rate-limiting. Reference (`scraper-boilerplate/worker/src/auth.ts`)
+har PBKDF2-hashing + HMAC-signerede sessions via Web Crypto API --
+**framework-uafhængigt, direkte portérbart** til PLAGGs plain
+`worker.js`. MEN `middleware.ts` bruger Hono-specifik `getCookie` --
+skal OMSKRIVES (ikke kopieres) mod rå Fetch API Request/Response.
+`rateLimit.ts` kræver et NYT Cloudflare KV-namespace (reel
+infrastruktur, ikke kun kode). **Afventer Esbens valg:** (a) behold ét
+delt kodeord (hashet server-side + session-cookie, mindst UX-ændring)
+vs. rigtige per-bruger-konti; (b) OK til at oprette et nyt KV-
+namespace på den live Worker? Size 5-6.
+
+**G26 (TODO, afventer valg) — Lås CORS.** `CORS_ORIGIN = "*"` ->
+`"https://firstdawndigital.github.io"`, én linje. **Bivirkning
+opdaget under selve evalueringen:** hele denne sessions etablerede
+lokale test-arbejdsgang (`python -m http.server` på `localhost` mod
+den ægte Worker) ville stoppe med at virke, da localhost ikke længere
+er en tilladt Origin. **Afventer valg:** tillad BÅDE Pages-domænet og
+localhost eksplicit, eller acceptér besværligere lokal test fremover.
+Size 1.
+
+**G27 (TODO, afventer OK) — Turso-transport-swap.** `turso_io.py`s
+håndrullede HTTP mod `/v2/pipeline` erstattes med den officielle
+`libsql-client`-SDK (`TursoClient.execute()`/`.batch()`) --
+**verificeret praktisk muligt:** `pip install "git+https://github.com/
+fddigi/scraper-boilerplate.git@main#subdirectory=packages/scraper-
+core"` installerer og importerer korrekt med Python 3.11 (PLAGGs
+egen venv-version). **VIGTIGT, afgrænsning:** KUN transport-laget
+skiftes -- IKKE hele skabelonens `LocalStore`/`sync_pending()`-delta-
+sync-mønster, som antager inkrementel content-hash-dedup pr. item.
+PLAGGs `matches`/`bundles`-tabeller bruger et bevidst
+generations-swap-mønster (helt frisk `run_id` pr. kørsel, atomisk
+publicering, se G5-FIX's race-condition-fund) -- at tvinge
+delta-sync-mønsteret ind her risikerer at genindføre PRÆCIS den race
+condition G5-FIX loeste. `wishlist`-tabellen er også en daarlig
+pasform (skrives af frontend'en, ikke af monitor.py). Size 3-4
+(transport-swap alene).
+
+**G28 (TODO) — Secrets-scanning.** `.gitleaks.toml` fra skabelonen er
+minimal og direkte genbrugelig (extend default-ruleset + allowlist
+for `.env.example`/`wrangler.toml`-FILNAVNE, ikke indhold) -- PLAGG
+har ingen `.env.example` endnu, allowlisten skal justeres til det
+faktiske filnavn (`secrets.env`). `gitleaks`/`pre-commit` er ikke
+installeret på denne maskine. Skal køres mod HELE git-historikken som
+et engangstjek, ikke kun fremadrettet (et tidligere `.env.save`-fund
+blev slettet FØR commit, men er aldrig faktisk bekræftet fraværende
+fra historikken med et rigtigt værktøj). Size 2.
+
+**G29 (TODO, lav prioritet) — matching/pricing -> scraper-core.**
+`scraper_core.matching.build_synonym_lookup()`/`normalize_model_
+number()` og `scraper_core.pricing.parse_price()` er bygget DIREKTE
+ud fra PLAGGs egen retrospektiv (G18-sprogklynger, Sellpy-øre-bug,
+Vinted-punktum-decimal) -- verificeret ved faktisk import+kald, de
+dækker allerede PLAGGs mønstre. Ren de-duplikering, ingen aktiv bug
+(allerede rettet selv) -- kun mindre kode at vedligeholde. `watchdog.
+py`s `run_with_timeout()` er et SUPPLEMENT (per-kilde timeout), ikke
+en erstatning for `hang_guard.py`s proces-niveau watchdog. Size 2.
+
+**G30 (TODO, business #1) — Vinted-fragt: manuelt tjek-flow.**
+Erstatning for det automatisk-blokerede spor i G22. Esben foreslog:
+et menneske (Esben) gennemfører selv et par checkout-klik i egen
+browser (løser en evt. CAPTCHA som menneske, samme princip som DBA-
+login) og rapporterer de observerede rigtige fragttal tilbage --
+IKKE automatisering, et bevidst manuelt datapunkt-indsamlings-flow.
+Mulig udformning: en let "tjek fragt manuelt"-genvej i webappen
+(direkte link til annoncen) for udenlandske Vinted-fund, så Esben/
+konen hurtigt kan slå den reelle pris op ved behov uden at forlade
+flowet. Kræver et designvalg om hvor meget UI-understøttelse der er
+værd at bygge vs. bare et rent manuelt ad-hoc-flow. TBD, afventer
+scope-afklaring.
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 
