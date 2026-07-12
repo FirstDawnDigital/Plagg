@@ -17,7 +17,7 @@ google_sheets:
   # Genbruger service accountet fra ejendompython-arkivet -- ingen nyt Google Cloud-
   # projekt noedvendigt (se BACKLOG.md, afklarede spoergsmaal). Kopiér ALDRIG denne
   # fil ind i dette repo -- den ligger og bliver kun refereret her.
-  credentials_file: "/Users/server/CC/CCBOILERPLATE/OLD REPOS/ejendompython/google_credentials.json"
+  credentials_file: "./google_credentials.json"
   # Udfyldes automatisk foerste gang scriptet koerer, HVIS auto-oprettelse lykkes.
   # BEKRÆFTET 2026-07-08/09: dette service account har 0 Drive-lagerkvote (403 paa
   # baade Drive-API files.create og Sheets-API spreadsheets.create), saa auto-

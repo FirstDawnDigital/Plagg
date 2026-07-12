@@ -19,28 +19,52 @@ live 2026-07-10/11, flere koersler om dagen, 14-25 matches typisk).
 
 ## Aktiv backlog (næste øverst)
 
-**Rækkefølge pr. 2026-07-12:** Esben har eksplicit bedt om at starte med de
-TEKNISKE punkter (G23-G29, hærdning ift. `scraper-boilerplate`-evalueringen +
-sti-flytningens fund) før business-features (G22/G30 + G2-G4) tages op igen.
+**To spor, samlet 2026-07-13.** TEKNISK spor (G23-G29, hærdning ift.
+`scraper-boilerplate`-evalueringen + sti-flytningens fund) køres først,
+som Esben eksplicit bad om. BUSINESS-spor (G30 + G2-G4) er de features
+der reelt gør systemet mere nyttigt for Esbens kone i hverdagen -- tages
+op igen når det tekniske spor er landet, eller når Esben aktivt
+omprioriterer.
 
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
+      TEKNISK SPOR (køres nu)
 G23   Sti-flytning (~/CC/) + trigger-   Size 3        DONE
       watcher launchd-konsolidering
 G24   Healthcheck-ping (healthchecks.io)Size 1        NÆSTE
-G25   Rigtig auth (worker.js)           Size 5-6      TODO (afventer valg)
-G26   Lås CORS                          Size 1        TODO (afventer valg)
-G27   Turso-transport-swap (libsql)     Size 3-4      TODO (afventer OK)
+G25   Rigtig auth (worker.js)           Size 5-6      TODO (valg afklaret)
+G26   Lås CORS                          Size 1        DONE
+G27   Turso: unders. delta-sync-moenst. Size TBD       TODO (undersøges)
 G28   Secrets-scanning (gitleaks)       Size 2        TODO
 G29   matching/pricing -> scraper-core  Size 2        TODO (lav prioritet)
 ----  --------------------------------  ------------  --------
+      BUSINESS-SPOR (efter teknisk spor, eller ved omprioritering)
+G30   Vinted-fragt: manuelt tjek-flow   TBD           TODO (feature #1)
 G22   Vinted: login-baseret fragt       Size 5-6      DELVIST BLOKERET
-G30   Vinted-fragt: manuelt tjek-flow   TBD           TODO (business #1)
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
 G3    Beskedudkast + reservation        WSJF 2.0      TODO (konens brug)
 ```
+
+**Business-features, kort status (detaljer i deres respektive afsnit
+nedenfor):**
+- **G30 (feature #1):** Vinted-fragt for udenlandske sælgere kan ikke
+  hentes automatiseret (DataDome-CAPTCHA på checkout, se G22). Esben
+  foreslog i stedet et menneske-i-loopet manuelt tjek-flow -- afventer
+  scope-afklaring (ren ad-hoc vs. UI-understøttet genvej).
+- **G22:** login-baseret automatiseret Vinted-fragt -- delvist blokeret,
+  se dedikeret afsnit for hvad der reelt blev afprøvet og hvorfor.
+- **G4 (region-filtrering):** ikke afvist, bare ikke prioriteret endnu.
+  Esbens kone skal kunne filtrere fund efter afhentnings-/forsendelses-
+  region.
+- **G2 (notifikationer):** kvalificeres af Esbens kones faktiske
+  brugsmønster -- bevidst ikke bygget før der er reel brug at basere
+  designet på (fx: notifikation ved nyt "eksakt match", ikke bare en
+  generel opsummering).
+- **G3 (beskedudkast/reservation):** samme kvalificerings-gate som G2 --
+  automatisk udkast til besked til sælger + evt. reservations-flow, når
+  brugsmønsteret retfærdiggør det.
 
 Leveret (detaljer nedenfor): G5 (webapp LIVE), G7 (størrelse valgfri),
 G8 (Sellpy-kilde), G9 (Vinted-kilde), J4-J7 (kritikrunde 2),
@@ -676,42 +700,23 @@ foran G-serien (brief §10-idéer) fordi den rettede selve MVP-outputtet og var
 billigere/mere presserende end at udvide scope. G-serien er kun groft scoret;
 re-scores naar vi kender faktisk brugsmønster over tid.
 
-## Udestående (2026-07-09) — til fælles planlægning
+## Historisk udestående-liste (2026-07-09) — ALLE punkter siden afklaret
 
-```
-Emne                                   Type          Ejer
---------------------------------------  ------------  ------------
-G5: aktivér som dagligt dashboard      Beslutning    Esben
-  (config-flip til "turso", se G5-status)
-G2 -- notifikationer                   Kvalificering Esbens kone
-G3 -- beskedudkast/reservation         Kvalificering Esbens kone
-G4 -- region-filtrering                Prioritering  Esben
-launchd: 2x-dagligt scheduled task     Drift         Esben (godkend)
-launchd: trigger_watcher.py            Drift         Esben (godkend)
-DBA-session (.dba_storage_state.json)  Kendt risiko  Esben (ved udløb)
-```
-
-- **G5:** kode pushet, webapp live på https://firstdawndigital.github.io/Plagg/
-  (repo `FirstDawnDigital/Plagg`, gjort offentligt 2026-07-10 for at
-  kunne bruge GitHub Pages på org-planen). Eneste resterende skridt er
-  Esbens egen beslutning om at aktivere Turso-sporet som det der reelt
-  opdateres ved fremtidige kørsler (config-flip, se G5-status).
-- **G2/G3:** bevidst ikke bygget — begge kræver at Esbens kone har brugt
-  systemet et stykke tid først, så kvalificeringen er baseret på reel
-  brug, ikke gæt.
-- **G4:** ikke afvist, bare ikke prioriteret af Esben endnu.
-- **launchd (begge):** dokumenteret i README.md, bevidst ikke installeret
-  — er en systemniveau-ændring der kræver eksplicit godkendelse. Uden
-  dem overlever hverken det 2x-dagligt scrape eller Kør nu-trigger'en en
-  genstart/session-lukning af Mac'en.
-- **DBA-session:** ingen automatisk fornyelse i MVP (bevidst, se G1-fund)
-  — når den udløber, stopper `sources/dba.py` gracefully og logger en
-  fejl, ikke en crash, men kilden leverer 0 resultater indtil Esben
-  gentager manuel-login-trinnet.
-- **Git:** lokalt repo er initialiseret (`git init` kørt 2026-07-09 i
-  forbindelse med at validere `.gitignore`) men INGEN commits/push er
-  lavet endnu — hele kodebasen mangler stadig at komme op på
-  `FirstDawnDigital/Plagg`.
+> Denne sektion er forældet og bevaret kun som historik. Alle punkter
+> herunder er enten leveret eller er blevet en del af den aktive backlog
+> øverst i filen ("Aktiv backlog (næste øverst)") -- se den i stedet for
+> aktuel status.
+>
+> - G5 (webapp som dagligt dashboard): LEVERET, live siden 2026-07-10.
+> - G2/G3 (notifikationer/beskedudkast): stadig i business-sporet ovenfor,
+>   fortsat gated på Esbens kones faktiske brug.
+> - G4 (region-filtrering): stadig i business-sporet ovenfor.
+> - launchd (2x-dagligt + trigger_watcher): LEVERET/opdateret, se G19
+>   (automatisk periodisk kørsel) og G23 (sti-flytning + launchd-
+>   konsolidering af begge trigger_watcher-instanser).
+> - DBA-session: fortsat samme bevidste ikke-automatiserede design (G1),
+>   ingen ændring.
+> - Git-repo: leveret, `FirstDawnDigital/Plagg` er offentligt og aktivt.
 
 ### G5-status (2026-07-09): forudsætninger klar, arkitektur ikke lagt endnu
 
