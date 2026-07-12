@@ -17,6 +17,8 @@ Prioritering (brief §5):
 import logging
 import re
 
+from scraper_core.matching import build_synonym_lookup, expand_synonyms
+
 logger = logging.getLogger("personal_shopper.matching")
 
 # Standard EU boerne-toejstoerrelser i stigende raekkefoelge -- bruges til at
@@ -86,24 +88,18 @@ _TYPE_CLUSTERS = [
 ]
 
 
-def _build_type_synonyms(clusters: list) -> dict:
-    """Udvider klynger til et fladt opslags-dict: hvert ord i en klynge
-    peger paa HELE klyngens ordsaet, saa uanset hvilket ord i klyngen
-    oensket-typen bruger, faar man samme brede synonym-daekning (fx et
-    oenske om 'sweatshirt' matcher ogsaa 'hættetrøje'/'cardigan'/svensk
-    'tröja', ikke kun praecis 'sweatshirt')."""
-    synonyms = {}
-    for cluster in clusters:
-        for word in cluster:
-            synonyms[word] = cluster
-    return synonyms
-
-
+# G29 (2026-07-13): den generiske klynge-udvidelses-logik ("hvert ord i en
+# klynge peger paa hele klyngens ordsaet") er flyttet til `scraper_core.
+# matching.build_synonym_lookup()`/`expand_synonyms()` -- bygget DIREKTE ud
+# fra dette moduls egen G18-loesning (se `scraper-boilerplate`s matching.py-
+# docstring). `_TYPE_CLUSTERS`-INDHOLDET (PLAGGs domaenespecifikke ordklynger)
+# forbliver her -- kun selve opslags-MEKANIKKEN er flyttet til den delte pakke.
+#
 # Typer der regnes som synonymer for hinanden ved matching -- se _TYPE_CLUSTERS
 # ovenfor for kilder/begrundelse. Reshoppers/DBAs/Sellpys/Vinteds egne titler
 # blander frit fx "leggings"/"jeggings", "bukser"/"jeans"/"shorts", samt nu
 # ogsaa fremmedsprogede varianter fra Vinteds internationale saelgere.
-TYPE_SYNONYMS = _build_type_synonyms(_TYPE_CLUSTERS)
+TYPE_SYNONYMS = build_synonym_lookup(_TYPE_CLUSTERS)
 
 GENERIC_BRAND_MARKERS = {"", "ukendt", "unknown", "blandet", "diverse", "no brand"}
 
@@ -188,7 +184,7 @@ def _stand_ok(wl_stand: str, item_stand: str) -> bool:
 
 def _type_matches(wishlist_type: str, item_title: str) -> bool:
     title_lower = (item_title or "").lower()
-    synonyms = TYPE_SYNONYMS.get(wishlist_type, {wishlist_type})
+    synonyms = expand_synonyms(wishlist_type, TYPE_SYNONYMS)
     return any(syn in title_lower for syn in synonyms)
 
 

@@ -84,6 +84,8 @@ import logging
 import re
 from urllib.parse import quote
 
+from scraper_core.pricing import parse_price
+
 logger = logging.getLogger("personal_shopper.sellpy")
 
 # G21 (2026-07-11): FOER denne dato var dette True (fetch_details() var en
@@ -188,9 +190,13 @@ def _hit_to_listing(hit: dict) -> dict | None:
     amount_ore = price_dk.get("amount")
     if amount_ore is None:
         return None  # ingen pris -> kan ikke prisfiltrere, spring over
-    try:
-        price = round(float(amount_ore) / 100.0, 2)  # øre -> kroner
-    except (TypeError, ValueError):
+    # G29: scraper_core.pricing.parse_price(unit="minor") -- praecis den bug-
+    # klasse denne funktion blev bygget ud fra (Sellpys pris ER i oere, ikke
+    # kr., se pricing.py's egen docstring). unit skal angives EKSPLICIT ved
+    # hvert kald (ingen default), saa et fremtidigt kildemodul der glemmer at
+    # angive den faar en tydelig fejl i stedet for en stille 100x-fejl.
+    price = parse_price(amount_ore, unit="minor")
+    if price is None:
         return None
 
     md = hit.get("metadata") or {}

@@ -64,6 +64,8 @@ import re
 import time
 from urllib.parse import quote
 
+from scraper_core.pricing import parse_price
+
 logger = logging.getLogger("personal_shopper.dba")
 
 # HAERDNINGS-NOTE (2026-07-10) -- se sources/reshopper.py's identiske note og
@@ -194,16 +196,20 @@ def _build_search_url(term: str) -> str:
 def _parse_kr_amount(text: str) -> float | None:
     """Udtraekker det foerste 'X kr.'-beloeb i en tekststreng (dansk
     talformat, komma som decimal) -- bruges baade til kort-priser og til
-    fragt-teksten ('Fragt fra 29,99 kr. + Tryg betaling 11 kr.')."""
+    fragt-teksten ('Fragt fra 29,99 kr. + Tryg betaling 11 kr.').
+    G29: talformat-parsingen selv sker via scraper_core.pricing.parse_price()
+    -- kun selve udtraekningen af beloebs-understrengen (regex) er PLAGG-
+    specifik og forbliver her. decimal_style TVUNGET til "comma" (IKKE
+    "auto") -- se sources/reshopper.py's identiske fund: "auto" fejl-
+    fortolker en pris UDEN komma (fx et helt tusind "1.234 kr.") som
+    punktum-decimal (~1000x for lavt), da DBAs priser er ALTID dansk-
+    formaterede, aldrig tvetydige med engelsk konvention."""
     if not text:
         return None
     m = _KR_AMOUNT_RE.search(text.replace("\xa0", " "))
     if not m:
         return None
-    try:
-        return float(m.group(1).replace(".", "").replace(",", "."))
-    except ValueError:
-        return None
+    return parse_price(m.group(1), unit="major", decimal_style="comma")
 
 
 def _looks_like_bot_wall(response, page) -> bool:
@@ -268,10 +274,9 @@ def _parse_search_cards(cards: list[dict]) -> list[dict]:
             for i, line in enumerate(lines):
                 m = _PRICE_LINE_RE.match(line.replace("\xa0", " "))
                 if m:
-                    try:
-                        price = float(m.group(1).replace(".", "").replace(",", "."))
-                    except ValueError:
-                        price = None
+                    # G29: se _parse_kr_amount()'s docstring for begrundelse
+                    # om hvorfor decimal_style er TVUNGET til "comma".
+                    price = parse_price(m.group(1), unit="major", decimal_style="comma")
                     price_idx = i
                     break
             if price is None:

@@ -37,6 +37,8 @@ import re
 import time
 from urllib.parse import quote
 
+from scraper_core.pricing import parse_price
+
 logger = logging.getLogger("personal_shopper.reshopper")
 
 # HAERDNINGS-NOTE (2026-07-10, se hang_guard.py's docstring): Playwrights
@@ -161,10 +163,19 @@ def _parse_search_cards(page, limit: int) -> list[dict]:
                 if price is None:
                     m = _PRICE_RE.match(line.replace("\xa0", " "))
                     if m:
-                        try:
-                            price = float(m.group(1).replace(".", "").replace(",", "."))
-                        except ValueError:
-                            price = None
+                        # G29: scraper_core.pricing.parse_price(), unit=
+                        # "major" (allerede kr., ikke oere). decimal_style
+                        # TVUNGET til "comma" (IKKE "auto") -- Reshoppers
+                        # priser er ALTID dansk-formaterede (punktum =
+                        # tusind-separator, komma = decimal), ALDRIG
+                        # tvetydige med engelsk konvention. VIGTIGT FUND
+                        # (2026-07-13): "auto" fejlfortolker en pris UDEN
+                        # komma overhovedet (fx "1.234" for "1234 kr.",
+                        # et helt tusind uden oere) som punktum-decimal
+                        # (1.234, ~1000x for lavt!) -- "auto" er designet
+                        # til at haandtere tvetydige/blandede kilder, men
+                        # her ER der ingen tvetydighed at haandtere.
+                        price = parse_price(m.group(1), unit="major", decimal_style="comma")
 
             if price is None:
                 continue  # kan ikke prisfiltrere uden en pris -- spring over

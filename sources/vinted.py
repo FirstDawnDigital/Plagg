@@ -125,6 +125,8 @@ import re
 import time
 from urllib.parse import quote
 
+from scraper_core.pricing import parse_price
+
 logger = logging.getLogger("personal_shopper.vinted")
 
 BASE_URL = "https://www.vinted.dk/"
@@ -296,10 +298,17 @@ def _hit_to_listing(hit: dict) -> dict | None:
     amount_raw = price_obj.get("amount")
     if amount_raw is None:
         return None  # ingen pris (fx byttes-annonce) -- kan ikke prisfiltrere
-    try:
-        price = round(float(amount_raw), 2)  # se modulets docstring for prisvalg-begrundelse
-    except (TypeError, ValueError):
+    # G29: scraper_core.pricing.parse_price(), unit="major" (allerede kr.,
+    # se modulets docstring for prisvalg-begrundelse), decimal_style="dot"
+    # TVUNGET eksplicit -- Vinted bruger PUNKTUM som decimal ("47.26"),
+    # modsat Reshoppers/DBAs komma-decimal-fritekst, paa samme regionale
+    # markedsplads-type. At tvinge stilen i stedet for at stole paa "auto"
+    # forhindrer en fremtidig regression hvis Vinted nogensinde skulle
+    # returnere en streng med et tusind-separator-komma.
+    price = parse_price(amount_raw, unit="major", decimal_style="dot")
+    if price is None:
         return None
+    price = round(price, 2)
 
     url = hit.get("url")
     if not url:

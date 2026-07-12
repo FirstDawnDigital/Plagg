@@ -484,15 +484,37 @@ code 1, ingen commit lavet), et harmløst testcommit passerede
 uhindret. Begge testcommits fjernet igen bagefter (ingen af dem
 pushet). Size 2.
 
-**G29 (TODO, lav prioritet) — matching/pricing -> scraper-core.**
-`scraper_core.matching.build_synonym_lookup()`/`normalize_model_
-number()` og `scraper_core.pricing.parse_price()` er bygget DIREKTE
-ud fra PLAGGs egen retrospektiv (G18-sprogklynger, Sellpy-øre-bug,
-Vinted-punktum-decimal) -- verificeret ved faktisk import+kald, de
-dækker allerede PLAGGs mønstre. Ren de-duplikering, ingen aktiv bug
-(allerede rettet selv) -- kun mindre kode at vedligeholde. `watchdog.
-py`s `run_with_timeout()` er et SUPPLEMENT (per-kilde timeout), ikke
-en erstatning for `hang_guard.py`s proces-niveau watchdog. Size 2.
+**G29 (DONE, 2026-07-13) — matching/pricing -> scraper-core.**
+`matching.py`s `_build_type_synonyms()` erstattet med `scraper_core.
+matching.build_synonym_lookup()`, `_type_matches()`s opslag erstattet
+med `expand_synonyms()` -- PLAGGs egne `_TYPE_CLUSTERS` (domaene-
+indhold) uaendret, kun opslags-MEKANIKKEN er delt nu. Alle 4 kilders
+manuelle `.replace(".","").replace(",",".")`-prisparsing erstattet med
+`scraper_core.pricing.parse_price()`: Sellpy (`unit="minor"`, den
+konkrete oere-bug-klasse dette blev bygget til), Vinted (`unit="major",
+decimal_style="dot"`), Reshopper/DBA (`unit="major", decimal_style=
+"comma"`, 3 kaldssteder inkl. DBAs delte `_parse_kr_amount()`-
+fragttekst-parser). **KRITISK FUND undervejs (fanget FØR produktion):**
+`decimal_style="auto"` (modulets default) fejlfortolkede en Reshopper/
+DBA-pris UDEN komma overhovedet (fx "1.234 kr." for et helt tusind,
+ingen øre) som punktum-decimal -- gav 1.234 i stedet for korrekt 1234.0,
+en ~1000x for lav pris. Årsag: Reshopper/DBA er ALTID dansk-formaterede,
+aldrig tvetydige med engelsk konvention -- "auto" er designet til
+tvetydige/blandede kilder, hvilket disse ikke er. Rettet ved at TVINGE
+`decimal_style="comma"` eksplicit for begge kilder (ikke stole på
+auto-detektion) -- dette var IKKE dokumenteret risiko fra evalueringen,
+men fundet ved grundig regressionstest, se rapporterede fund til
+`scraper-boilerplate`-agenten. **Verificeret:** alle 18 tidligere G18-
+type-matching-regressionscases uændret korrekte; 7 pris-parsing-
+regressionscases inkl. det kritiske "helt tusind uden komma"-scenarie;
+LIVE mod alle 4 rigtige kilder -- Reshopper ramte reelle 4-cifrede
+priser ("1900.0", "1300.0" for klapvogne), DBA ligeså ("7800.0",
+"3000.0", "2500.0"), begge korrekt parset (ville have været ~1000x for
+lave med "auto"); Sellpy/Vinted uændret korrekte. Fuld `monitor.py
+--dry-run` (alle 4 kilder) kørt igennem uden fejl, 21 matches, 1
+bundle. `watchdog.py`s `run_with_timeout()` (per-kilde timeout,
+supplement til `hang_guard.py`s proces-niveau watchdog) IKKE taget i
+brug -- lavere prioritet, ingen akut anledning. Size 2.
 
 **G30 (TODO, business #1) — Vinted-fragt: manuelt tjek-flow.**
 Erstatning for det automatisk-blokerede spor i G22. Esben foreslog:
