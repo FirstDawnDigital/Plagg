@@ -1,0 +1,19 @@
+title = "gitleaks config for personal-shopper (PLAGG)"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Kendte-sikre filnavne uden reelle hemmeligheder -- kun variabelnavne/placeholders, ingen faktiske noegler. secrets.env/google_credentials.json ligger ALDRIG i git (se .gitignore) -- dette moenster er et sikkerhedsnet, ikke den primaere beskyttelse."
+paths = [
+  '''wrangler\.toml$''',
+]
+# G28-scan (2026-07-13) fandt PRAECIS ét flag paa tvaers af HELE historikken:
+# Sellpys Algolia-SOEGE-key (search-only, ikke admin) i sources/sellpy.py --
+# offentligt indlejret i Sellpy.dk's egen frontend, bekraeftet ved G8-spiken
+# (BACKLOG.md 2026-07-10) og re-bekraeftet her ved at laese modulets egen
+# docstring. Regex-matches PRAECIS denne streng (ikke en bred fil-udelukkelse),
+# saa et FREMTIDIGT reelt hemmeligt fund i samme fil stadig ville blive fanget.
+regexes = [
+  '''380077912d5cdc2bebf67d4b4ad10a30''',
+]

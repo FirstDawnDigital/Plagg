@@ -461,15 +461,28 @@ condition G5-FIX loeste. `wishlist`-tabellen er også en daarlig
 pasform (skrives af frontend'en, ikke af monitor.py). Size 3-4
 (transport-swap alene).
 
-**G28 (TODO) — Secrets-scanning.** `.gitleaks.toml` fra skabelonen er
-minimal og direkte genbrugelig (extend default-ruleset + allowlist
-for `.env.example`/`wrangler.toml`-FILNAVNE, ikke indhold) -- PLAGG
-har ingen `.env.example` endnu, allowlisten skal justeres til det
-faktiske filnavn (`secrets.env`). `gitleaks`/`pre-commit` er ikke
-installeret på denne maskine. Skal køres mod HELE git-historikken som
-et engangstjek, ikke kun fremadrettet (et tidligere `.env.save`-fund
-blev slettet FØR commit, men er aldrig faktisk bekræftet fraværende
-fra historikken med et rigtigt værktøj). Size 2.
+**G28 (DONE, 2026-07-13) — Secrets-scanning.** `gitleaks` (v8.30.1) +
+`pre-commit` (v4.6.0) installeret via brew. Ny `.gitleaks.toml`
+(tilpasset PLAGG -- ingen `.env.example` findes, kun `wrangler.toml`-
+FILNAVNET er path-allowlistet). **Engangs-scan af HELE git-historikken
+(32 commits, ikke kun fremadrettet, per Esbens instruks):** fandt
+PRÆCIS ét flag -- Sellpys Algolia-SØGE-nøgle i `sources/sellpy.py`
+(bekræftet i modulets egen docstring: offentlig, client-side, search-
+only, ikke en admin-nøgle -- samme princip som Reshopper/DBA's
+hardcodede URL'er). Allowlistet med en PRÆCIS regex-streng-match (ikke
+en bred fil-udelukkelse), så et FREMTIDIGT reelt fund i samme fil
+stadig ville blive fanget -- verificeret eksplicit ved midlertidigt at
+fjerne allowlist-reglen og bekræfte scanneren korrekt genfandt nøglen.
+**INGEN andre hemmeligheder fundet** -- det tidligere `.env.save`-fund
+(slettet FØR commit, aldrig faktisk verificeret fraværende fra
+historikken med et rigtigt værktøj) er nu bekræftet: findes IKKE i
+historikken. `.pre-commit-config.yaml` tilføjet (kun gitleaks-hooken,
+Esben bad specifikt om secrets-scanning, ikke linting) og
+`pre-commit install` kørt -- **verificeret fungerende ende-til-ende**:
+et testcommit med en fake Stripe-nøgle blev korrekt BLOKERET (exit
+code 1, ingen commit lavet), et harmløst testcommit passerede
+uhindret. Begge testcommits fjernet igen bagefter (ingen af dem
+pushet). Size 2.
 
 **G29 (TODO, lav prioritet) — matching/pricing -> scraper-core.**
 `scraper_core.matching.build_synonym_lookup()`/`normalize_model_
