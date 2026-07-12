@@ -391,13 +391,31 @@ overlever nu crashes/genstart, ligesom `com.local.personal-shopper`
 røres aldrig uden eksplicit instruks). Verificeret: begge nye
 launchd-jobs kører, ingen fejl i logs efter genstart.
 
-**G24 (NÆSTE) — Healthcheck-ping.** Fra `scraper-boilerplate`s
-`scraper_core.healthcheck` (verificeret: to rene no-op-safe GET-kald,
-`ping_success()`/`ping_fail()`, ingen skjulte afhængigheder). Tilføjes
-additivt ved `monitor.py`s eksisterende terminal-grene
-(`write_final_status()`). **Kræver Esben:** oprette et NYT
-healthchecks.io-check specifikt til PLAGG (ekstern SaaS-konto/check,
-kan ikke gøres af Claude) og give URL'en til `secrets.env`. Size 1.
+**G24 (KODE DONE, 2026-07-13 — afventer Esbens URL) — Healthcheck-ping.**
+`scraper-core` tilføjet som git-dependency i `requirements.txt`
+(`pip install git+https://github.com/fddigi/scraper-boilerplate.git@main
+#subdirectory=packages/scraper-core`, verificeret installerbart med
+PLAGGs egen Python 3.11-venv). Ny `monitor.load_healthcheck_url()`
+læser `HEALTHCHECK_URL` fra `secrets.env` (samme manuelle 'KEY=value'-
+parsing + env-override-mønster som `turso_io.load_turso_config()`) --
+tom streng hvis ikke sat, hvilket gør `ping_success()`/`ping_fail()`
+100% no-op-safe. Ping tilføjet additivt ved ALLE 3 af `monitor.py`s
+terminal-grene: `ping_fail()` ved "ingen kilder konfigureret" og "alle
+kilder fejlede", `ping_success()` ved den normale succesfulde
+afslutning (efter `write_final_status()`, samme steder). Skippes
+korrekt for `--dry-run` (samme princip som selve output-skrivningen).
+**Verificeret grundigt:** (1) no-op bekræftet for tom/None URL, ingen
+undtagelse; (2) en lokal dummy-HTTP-server bekræftede `ping_success()`
+rammer base-URL'en og `ping_fail()` rammer `/fail`-suffikset korrekt;
+(3) en ægte `--dry-run`-kørsel gennemførte uden fejl (ingen ping, som
+tilsigtet); (4) en ÆGTE (ikke dry-run) kørsel af `monitor.py` mod en
+lokal dummy-healthcheck-server bekræftede PRÆCIS ét success-ping
+modtaget, SAMTIDIG med at både Sheets og Turso blev skrevet korrekt --
+ingen regression i eksisterende output. **Afventer kun Esben:** oprette
+et NYT healthchecks.io-check specifikt til PLAGG (ekstern SaaS-konto,
+kan ikke gøres af Claude) og tilføje `HEALTHCHECK_URL=<url>` til
+`secrets.env`. Uden det er linjen 100% harmløs (no-op), som testet.
+Size 1.
 
 **G25 (TODO, afventer valg) — Rigtig auth i `worker.js`.** I dag: ét
 delt `X-API-Key`, synligt for enhver i DevTools, ingen session, ingen

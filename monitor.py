@@ -20,6 +20,7 @@ import os
 import sys
 
 import yaml
+from scraper_core import healthcheck
 
 import bundling
 import db
@@ -83,6 +84,23 @@ def setup_logging(log_path: str) -> None:
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def load_healthcheck_url(secrets_path: str = "secrets.env") -> str:
+    """G24: HEALTHCHECK_URL fra secrets.env eller miljoevariabel, samme
+    manuelle 'KEY=value'-parsing + env-override-moenster som turso_io.py's
+    load_turso_config() (ingen python-dotenv-afhaengighed). Tom streng hvis
+    ikke sat noget sted -- scraper_core.healthcheck's ping_success()/
+    ping_fail() er begge BEVIDST no-op-safe for en tom/None URL, saa PLAGG
+    fungerer uaendret uden at Esben har oprettet et healthchecks.io-check."""
+    url = ""
+    if os.path.exists(secrets_path):
+        with open(secrets_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("HEALTHCHECK_URL="):
+                    url = line.split("=", 1)[1].strip()
+    return os.environ.get("HEALTHCHECK_URL", url)
 
 
 def build_search_terms(wishlist: list[dict]) -> list[str]:
@@ -304,6 +322,13 @@ def main() -> int:
 
     if args.dry_run:
         logger.info("--dry-run aktiv: skriver ikke til DB eller Sheets")
+
+    # G24: healthchecks.io-ping ved koerslens afslutning (success/fail),
+    # se load_healthcheck_url()'s docstring -- no-op-safe hvis Esben ikke
+    # har oprettet et check endnu, saa denne linje er 100% harmloes at
+    # tilfoeje. Springes over ved --dry-run, samme princip som output-
+    # skrivningen nedenfor (en test-koersel er ikke en "rigtig" koersel).
+    healthcheck_url = load_healthcheck_url(config.get("turso", {}).get("secrets_path", "secrets.env")) if not args.dry_run else ""
 
     # Sheets-klient + spreadsheet oprettes/aabnes FOER oenskesedlen indlaeses,
     # saa wishlist.source=sheet kan bruge samme spreadsheet som dashboardet.
@@ -599,6 +624,7 @@ def main() -> int:
     if not sources_to_run:
         logger.warning("Ingen kilder blev konfigureret til at koere denne gang -- springer output-skrivning over")
         write_final_status("Fejlede: ingen kilder konfigureret i config.yaml")
+        healthcheck.ping_fail(healthcheck_url)
     elif not any_source_succeeded:
         logger.warning(
             "ALLE konfigurerede kilder (%s) fejlede denne koersel (0 lykkedes) -- springer output-skrivning til "
@@ -607,6 +633,7 @@ def main() -> int:
             ", ".join(sources_to_run),
         )
         write_final_status(f"Fejlede kl. {now_str} -- alle kilder ({', '.join(sources_to_run)}) fejlede, se monitor.log")
+        healthcheck.ping_fail(healthcheck_url)
     elif args.dry_run:
         logger.info("--dry-run: skriver ikke til Sheets/Turso/CSV-fallback")
     else:
@@ -643,6 +670,10 @@ def main() -> int:
         # trigger_watcher.py's efterfoelgende stdout-parsing, som ikke koerer
         # naar monitor.py kaldes direkte/ad-hoc.
         write_final_status(f"Færdig kl. {now_str} ({len(all_matches)} matches, {len(all_bundles)} bundles)")
+        # G24: succes-ping -- denne gren er strukturelt allerede uden for
+        # --dry-run (se elif-kaeden ovenfor), saa der er intet ekstra tjek
+        # noedvendigt her.
+        healthcheck.ping_success(healthcheck_url)
 
     watchdog.cancel()
     return 0

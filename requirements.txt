@@ -3,3 +3,7 @@ playwright>=1.44
 gspread>=6.1
 google-auth>=2.29
 google-auth-oauthlib>=1.2
+# G24: healthchecks.io-ping-helper (ping_success/ping_fail), no-op-safe hvis
+# HEALTHCHECK_URL ikke er sat. Kraever Python 3.11+ (se pyproject.toml i
+# subdirectory'et) -- bekraeftet installerbart paa tvaers af repos 2026-07-12.
+git+https://github.com/fddigi/scraper-boilerplate.git@main#subdirectory=packages/scraper-core
