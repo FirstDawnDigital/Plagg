@@ -388,14 +388,19 @@ delt kodeord (hashet server-side + session-cookie, mindst UX-ændring)
 vs. rigtige per-bruger-konti; (b) OK til at oprette et nyt KV-
 namespace på den live Worker? Size 5-6.
 
-**G26 (TODO, afventer valg) — Lås CORS.** `CORS_ORIGIN = "*"` ->
-`"https://firstdawndigital.github.io"`, én linje. **Bivirkning
-opdaget under selve evalueringen:** hele denne sessions etablerede
-lokale test-arbejdsgang (`python -m http.server` på `localhost` mod
-den ægte Worker) ville stoppe med at virke, da localhost ikke længere
-er en tilladt Origin. **Afventer valg:** tillad BÅDE Pages-domænet og
-localhost eksplicit, eller acceptér besværligere lokal test fremover.
-Size 1.
+**G26 (DONE, 2026-07-12) — Lås CORS.** Esben valgte: tillad BÅDE
+Pages-domænet og localhost. `worker.js`s `CORS_ORIGIN = "*"` erstattet
+med en eksplicit allow-liste (`ALLOWED_ORIGINS` + `ALLOWED_ORIGIN_
+PREFIXES` for `localhost:<port>`/`127.0.0.1:<port>`, portnummer
+varierer fra test til test). `Access-Control-Allow-Origin` ekkoer nu
+KUN den matchende Origin tilbage (aldrig `*`) + en `Vary: Origin`-
+header (svaret afhænger af Origin, må ikke caches på tværs). Klargør
+samtidig G25's kommende session-cookies (`Access-Control-Allow-
+Credentials` er uforenelig med `*`-origin). **Verificeret live** mod
+den deployede Worker: Pages-domæne + localhost får korrekt deres
+Origin ekko'et tilbage; et simuleret ondsindet kopi-domæne
+(`evil-copycat.example.com`) får INGEN CORS-header overhovedet
+(browseren blokerer klientsidigt). Size 1.
 
 **G27 (TODO, afventer OK) — Turso-transport-swap.** `turso_io.py`s
 håndrullede HTTP mod `/v2/pipeline` erstattes med den officielle

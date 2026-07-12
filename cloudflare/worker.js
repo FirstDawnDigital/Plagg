@@ -22,15 +22,41 @@
  *   POST   /api/trigger        — UPDATE control SET run_now = 1
  */
 
-// CORS — åben for alle origins da API_KEY er den reelle sikkerhedsmekanisme
-const CORS_ORIGIN = "*";
+// G26: CORS laast til en eksplicit allow-liste i stedet for den tidligere
+// helt aabne "*". Produktions-domaenet (GitHub Pages) + localhost (enhver
+// port) for lokal test -- se BACKLOG.md's G26 for afvejningen. "*" kunne i
+// teorien lade en HVILKEN SOM HELST hjemmeside forsoege at kalde API'et fra
+// en besoegendes browser; en eksplicit allow-liste stopper det allerede i
+// browseren, foer forespoergslen naar Workeren.
+const ALLOWED_ORIGINS = [
+  "https://firstdawndigital.github.io",
+];
+// Lokal test (python -m http.server el. lign.) koerer typisk paa
+// http://localhost:<port> eller http://127.0.0.1:<port> -- portnummeret
+// varierer fra test til test, saa vi matcher praefikset i stedet for at
+// vedligeholde en liste af specifikke portnumre.
+const ALLOWED_ORIGIN_PREFIXES = ["http://localhost:", "http://127.0.0.1:"];
 
-function getCorsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": CORS_ORIGIN,
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  return ALLOWED_ORIGIN_PREFIXES.some((prefix) => origin.startsWith(prefix));
+}
+
+function getCorsHeaders(request) {
+  const origin = request.headers.get("Origin");
+  const headers = {
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+    "Vary": "Origin", // svaret afhaenger af Origin-headeren -- maa ikke caches paa tvaers af oprindelser
   };
+  // Ekko KUN den specifikke, whitelistede Origin tilbage (aldrig "*") --
+  // noedvendigt for at kunne tilfoeje "Access-Control-Allow-Credentials"
+  // senere (G25-sessions-cookies), som er uforenelig med en "*"-oprindelse.
+  if (isAllowedOrigin(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+  return headers;
 }
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -101,7 +127,7 @@ async function tursoExecute(env, sql, args = []) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const corsHeaders = getCorsHeaders();
+    const corsHeaders = getCorsHeaders(request);
 
     // CORS preflight
     if (request.method === "OPTIONS") {
