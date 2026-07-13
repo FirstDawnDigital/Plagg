@@ -33,9 +33,9 @@ ID    Emne                              Prioritet     Status
 G23   Sti-flytning (~/CC/) + trigger-   Size 3        DONE
       watcher launchd-konsolidering
 G24   Healthcheck-ping (healthchecks.io)Size 1        NÆSTE
-G25   Rigtig auth (worker.js)           Size 5-6      TODO (valg afklaret)
+G25   Rigtig auth (worker.js)           Size 5-6      DONE
 G26   Lås CORS                          Size 1        DONE
-G27   Turso: unders. delta-sync-moenst. Size TBD       TODO (undersøges)
+G27   Turso: generations-moenster        N/A           AFKLARET (ingen aendring)
 G28   Secrets-scanning (gitleaks)       Size 2        TODO
 G29   matching/pricing -> scraper-core  Size 2        TODO (lav prioritet)
 ----  --------------------------------  ------------  --------
@@ -420,18 +420,57 @@ den ægte produktionskørsel** (kl. 07:12-07:14): ingen fejl/advarsler i
 (21 matches, 1 bundle) -- healthcheck-pinget er bevidst tavst ved
 succes, så fraværet af fejl-linjer bekræfter et vellykket ping. Size 1.
 
-**G25 (TODO, afventer valg) — Rigtig auth i `worker.js`.** I dag: ét
-delt `X-API-Key`, synligt for enhver i DevTools, ingen session, ingen
-rate-limiting. Reference (`scraper-boilerplate/worker/src/auth.ts`)
-har PBKDF2-hashing + HMAC-signerede sessions via Web Crypto API --
-**framework-uafhængigt, direkte portérbart** til PLAGGs plain
-`worker.js`. MEN `middleware.ts` bruger Hono-specifik `getCookie` --
-skal OMSKRIVES (ikke kopieres) mod rå Fetch API Request/Response.
-`rateLimit.ts` kræver et NYT Cloudflare KV-namespace (reel
-infrastruktur, ikke kun kode). **Afventer Esbens valg:** (a) behold ét
-delt kodeord (hashet server-side + session-cookie, mindst UX-ændring)
-vs. rigtige per-bruger-konti; (b) OK til at oprette et nyt KV-
-namespace på den live Worker? Size 5-6.
+**G25 (DONE, 2026-07-13) — Rigtig auth i `worker.js`.** Erstatter den
+tidligere delte `X-API-Key` (synlig i DevTools, ingen session, ingen
+rate-limiting) med PBKDF2-hashet kodeord + HMAC-signerede sessions,
+porteret fra `scraper-boilerplate`s `auth.ts`/`middleware.ts`/
+`rateLimit.ts` -- EFTER skabelon-teamet selv delte den framework-
+uafhængige split (`authenticateRequest()`-kerne + Hono-adapter, commit
+`0d6fb33`), som ublokerede den tidligere afventende omskrivning.
+
+**KRITISK, IKKE selv fundet her -- porteret læring:** to reelle
+produktions-fund fra skabelonens egen historik BLEV RETTET FØR PLAGG
+kunne ramme dem: (1) sessionen sendes som `Authorization: Bearer
+<token>`-HEADER, ALDRIG en cookie -- et cookie-forsøg i skabelonen
+fejlede reelt i Safari, fordi GitHub Pages og Workeren ligger på to
+FORSKELLIGE top-level-domæner (third-party-cookie, blokeret af Safaris
+ITP uanset `SameSite`) -- login så ud til at lykkes ét øjeblik og
+hoppede så tilbage til login-siden. (2) `PBKDF2_ITERATIONS = 100_000`,
+IKKE et højere tal -- Cloudflare Workers' ÆGTE produktions-
+`crypto.subtle` håndhæver et HÅRDT loft på 100.000 iterationer, som
+hverken unit-tests eller `wrangler dev` fanger (kun den RIGTIGT
+deployede Worker) -- et for højt tal ville have gjort ALT login stille
+fejle med en generisk "forkert kodeord"-besked.
+
+**Leveret:** `hashPassword()`/`verifyPassword()`/`createSessionToken()`/
+`verifySessionToken()`/`authenticateRequest()`/
+`checkAndIncrementLoginAttempts()` porteret 1:1 til plain `worker.js`
+(ingen Hono-afhængighed). Nyt `POST /api/login` (kun `{password}` --
+Esben valgte ét delt husstands-kodeord, ikke per-bruger-konti, samme
+"klematis" beholdt men nu rigtigt hashet), `POST /api/logout`
+(symmetri, stateless). Nyt `RATE_LIMIT_KV`-namespace oprettet
+(`wrangler kv namespace create`) + bundet i `wrangler.toml`, 5 forsøg/
+15 min pr. IP. Nye Cloudflare secrets `PASSWORD_HASH`/
+`SESSION_HMAC_SECRET` sat non-interaktivt (den gamle `API_KEY`-secret
+efterladt urørt, men ikke længere brugt -- kan fjernes når G25 har
+kørt stabilt i produktion). CORS' `Allow-Headers` byttet fra
+`X-API-Key` til `Authorization`. Frontend: `LS_KEY` omdøbt til
+`plagg_session_token` (gemmer nu et signeret token, ALDRIG det rå
+kodeord), `apiFetch()` sender `Authorization: Bearer`-header og
+auto-detekterer et 401 (udløbet/ugyldigt token) -> rydder det gemte
+token og genviser login-prompten automatisk. `showPasswordPrompt()`
+kalder nu `POST /api/login` i stedet for at teste mod `/api/status`.
+
+**Verificeret grundigt LIVE mod den ægte deployede Worker** (ikke kun
+lokal Node-simulation, jf. iterations-loft-fundet ovenfor): korrekt
+login (200+token), forkert kodeord (401), manglende/ugyldigt token på
+beskyttede endpoints (401), rate-limiting (5. forsøg 429, bekræftet
+ved selv at ramme det og finde+slette min egen KV-testnøgle for at
+fortsætte), logout (200 med token, 401 uden). FULD Playwright-browser-
+test: forkert kodeord viser fejl, korrekt kodeord logger ind og loader
+rigtige data, et bevidst korrumperet gemt token trigger automatisk en
+ny login-prompt uden manuel sideopdatering, ingen mobil-overflow ved
+320px/375px. Size 5-6.
 
 **G26 (DONE, 2026-07-12) — Lås CORS.** Esben valgte: tillad BÅDE
 Pages-domænet og localhost. `worker.js`s `CORS_ORIGIN = "*"` erstattet
@@ -447,22 +486,42 @@ Origin ekko'et tilbage; et simuleret ondsindet kopi-domæne
 (`evil-copycat.example.com`) får INGEN CORS-header overhovedet
 (browseren blokerer klientsidigt). Size 1.
 
-**G27 (TODO, afventer OK) — Turso-transport-swap.** `turso_io.py`s
-håndrullede HTTP mod `/v2/pipeline` erstattes med den officielle
-`libsql-client`-SDK (`TursoClient.execute()`/`.batch()`) --
-**verificeret praktisk muligt:** `pip install "git+https://github.com/
-fddigi/scraper-boilerplate.git@main#subdirectory=packages/scraper-
-core"` installerer og importerer korrekt med Python 3.11 (PLAGGs
-egen venv-version). **VIGTIGT, afgrænsning:** KUN transport-laget
-skiftes -- IKKE hele skabelonens `LocalStore`/`sync_pending()`-delta-
-sync-mønster, som antager inkrementel content-hash-dedup pr. item.
-PLAGGs `matches`/`bundles`-tabeller bruger et bevidst
-generations-swap-mønster (helt frisk `run_id` pr. kørsel, atomisk
-publicering, se G5-FIX's race-condition-fund) -- at tvinge
-delta-sync-mønsteret ind her risikerer at genindføre PRÆCIS den race
-condition G5-FIX loeste. `wishlist`-tabellen er også en daarlig
-pasform (skrives af frontend'en, ikke af monitor.py). Size 3-4
-(transport-swap alene).
+**G27 (AFKLARET, 2026-07-13 — ingen ændring i PLAGG lige nu) — Turso-
+generations-mønster.** Esben bad om at undersøge hele delta-sync-
+spørgsmålet grundigt (ikke kun et transport-swap). Spurgt direkte til
+`scraper-boilerplate`-teamet: byg et separat, førsteklasses
+`scraper_core.generations`-modul til PLAGGs mønster, eller lad være?
+
+**Svar:** Bygget (commit `9496d97`) -- MED en vigtig selvstændig
+rettelse undervejs. Teamets FØRSTE udkast af `generations.py` havde to
+reelle korrekthedsfejl, fundet ved at bruge PLAGGs `turso_io.py` som
+reference: (1) `run_id` var wall-clock-baseret i stedet for en atomisk
+server-side tæller (kan kollidere/gå tilbage ved urskævhed); (2)
+`cleanup_superseded()` brugte netop det brede "slet-alt-der-ikke-er-
+current"-mønster som PLAGGs G5-FIX-kommentar advarer imod -- PRÆCIS
+den race condition PLAGG selv fandt og rettede tidligere denne
+sæson. Rettet til at matche `write_matches_and_bundles()`s mønster
+1:1 (`allocate_run()` -> atomisk `(run_id, superseded_run_id)`,
+`publish_generation()` returnerer om man vandt raceren,
+`cleanup_superseded()` tager et EKSPLICIT `superseded_run_id` og
+kaldes kun af vinderen), inkl. en regressionstest for netop dette
+scenarie.
+
+**Konklusion/beslutning:** ingen migrering af `turso_io.py` lige nu.
+PLAGGs egen implementering er BEKRÆFTET korrekt (en uafhængig
+genopbygning, brugt som reference, fandt ingen fejl i selve mønsteret
+-- kun i skabelonens FØRSTE forsøg på at genskabe det) og allerede i
+produktion. En migrering ville udskifte den LIVE data-skrive-sti for
+et værktøj familien aktivt bruger dagligt, uden nogen aktiv bug at
+rette -- gevinsten (mindre selv-vedligeholdt kode) er reel, men ikke
+uopsættelig. API'et er tilgængeligt hvis/når det bliver relevant:
+`ensure_control_table()`+`ensure_control_row()` ved opstart, derefter
+pr. kørsel `allocate_run()` -> `insert_generation_rows()` (én gang pr.
+tabel) -> `publish_generation()` (én gang) -> `cleanup_superseded()`
+(én gang pr. tabel, kun ved vundet race). Ingen kode-ændring i PLAGG
+som følge af denne undersøgelse -- kun ekstern validering af et
+allerede korrekt, allerede leveret mønster (G5-FIX). Size: N/A (ingen
+implementering).
 
 **G28 (DONE, 2026-07-13) — Secrets-scanning.** `gitleaks` (v8.30.1) +
 `pre-commit` (v4.6.0) installeret via brew. Ny `.gitleaks.toml`

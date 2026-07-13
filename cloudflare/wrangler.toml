@@ -3,4 +3,11 @@ main = "worker.js"
 compatibility_date = "2026-07-09"
 
 [vars]
-# Secrets sættes via: wrangler secret put TURSO_URL / TURSO_AUTH_TOKEN / API_KEY
+# Secrets sættes via: wrangler secret put TURSO_URL / TURSO_AUTH_TOKEN /
+# PASSWORD_HASH / SESSION_HMAC_SECRET (G25 -- den gamle API_KEY-secret er
+# ikke laengere i brug og kan fjernes naar G25 er bekraeftet i produktion).
+
+# G25: login-rate-limiting (se cloudflare/worker.js's checkAndIncrementLoginAttempts()).
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "92f6f5a7805d453899850486975d1753"

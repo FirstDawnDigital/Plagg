@@ -361,16 +361,38 @@
 <script>
   // ── API-konfiguration (samme mønster som ejendompython/docs/index.html) ──
   const WORKER_URL = "https://plagg-api.proqual.workers.dev";
-  const LS_KEY     = "plagg_api_key";
+  // G25: gemmer nu et HMAC-signeret SESSIONS-TOKEN (udstedt af POST /api/
+  // login), IKKE længere en raa delt adgangskode -- omdøbt fra
+  // 'plagg_api_key' for at afspejle det. Sendes som "Authorization: Bearer
+  // <token>"-header (IKKE en cookie -- se cloudflare/worker.js's docstring
+  // om hvorfor: Safaris third-party-cookie-blokering ville have brudt
+  // login helt, da GitHub Pages og denne Worker ligger paa to forskellige
+  // top-level-domaener, et REELT fund fra scraper-boilerplate).
+  const LS_KEY = "plagg_session_token";
 
-  function getApiKey() {
+  function getSessionToken() {
     return localStorage.getItem(LS_KEY) || "";
   }
 
-  function apiFetch(path, options = {}) {
-    const key = getApiKey();
-    const headers = { ...(options.headers || {}), "X-API-Key": key };
-    return fetch(WORKER_URL + path, { ...options, headers });
+  // G25: forhindrer flere samtidige "din session er udløbet"-prompter, hvis
+  // flere apiFetch()-kald (fx loadMatchesAndBundles()'s to parallelle kald)
+  // rammer 401 paa naesten samme tidspunkt.
+  let reauthPromptShowing = false;
+
+  async function apiFetch(path, options = {}) {
+    const token = getSessionToken();
+    const headers = { ...(options.headers || {}), "Authorization": `Bearer ${token}` };
+    const res = await fetch(WORKER_URL + path, { ...options, headers });
+    // G25: en session kan udløbe (efter 30 dage) eller blive ugyldig (fx
+    // hvis Esben skifter kodeordet) MENS et gemt token stadig ligger i
+    // localStorage -- uden dette ville siden bare vise generiske "kunne
+    // ikke hente data"-fejl for evigt, uden nogen vej tilbage til login.
+    if (res.status === 401 && !reauthPromptShowing) {
+      reauthPromptShowing = true;
+      localStorage.removeItem(LS_KEY);
+      showPasswordPrompt(() => { location.reload(); });
+    }
+    return res;
   }
 
   function showPasswordPrompt(onSuccess) {
@@ -404,19 +426,30 @@
     input.focus();
 
     async function attempt() {
-      const key = input.value.trim();
-      if (!key) return;
+      const password = input.value.trim();
+      if (!password) return;
       btn.disabled = true;
       btn.textContent = "Tjekker…";
-      // Tjek nøglen mod /api/status -- 200 = gyldig, 401 = forkert
+      // G25: POST /api/login -- serveren verificerer kodeordet (PBKDF2-
+      // hashet, aldrig sammenlignet i klartekst) og udsteder et signeret
+      // sessions-token ved succes. Selve kodeordet gemmes ALDRIG noget
+      // sted -- kun det udstedte token.
       try {
-        const res = await fetch(WORKER_URL + "/api/status", {
-          headers: { "X-API-Key": key }
+        const res = await fetch(WORKER_URL + "/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
         });
         if (res.ok) {
-          localStorage.setItem(LS_KEY, key);
+          const data = await res.json();
+          localStorage.setItem(LS_KEY, data.token);
+          reauthPromptShowing = false;
           overlay.remove();
           onSuccess();
+        } else if (res.status === 429) {
+          err.textContent = "For mange forsøg -- vent 15 minutter og prøv igen.";
+          btn.disabled = false;
+          btn.textContent = "Log ind";
         } else {
           err.textContent = "Forkert adgangskode -- prøv igen.";
           input.value = "";
@@ -1021,7 +1054,7 @@
     await Promise.all([loadMatchesAndBundles(), loadWishlist()]);
   }
 
-  if (getApiKey()) {
+  if (getSessionToken()) {
     loadData();
   } else {
     showPasswordPrompt(loadData);

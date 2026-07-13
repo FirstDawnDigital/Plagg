@@ -4,15 +4,36 @@
  * DEPLOY: cd cloudflare && wrangler deploy
  *
  * Proxyer API-kald fra frontend (docs/index.html) til Turso.
- * Holder TURSO_URL, TURSO_AUTH_TOKEN og API_KEY som Cloudflare Secrets.
- * Samme mønster som CC ARCHIVE/ejendompython/cloudflare/worker.js
- * (tursoExecute()-hjælper mod /v2/pipeline, X-API-Key-auth, åben CORS).
+ * Holder TURSO_URL, TURSO_AUTH_TOKEN, PASSWORD_HASH og SESSION_HMAC_SECRET
+ * som Cloudflare Secrets, RATE_LIMIT_KV som et bundet KV-namespace.
+ *
+ * G25 (2026-07-13): erstatter den tidligere delte, raa X-API-Key (synlig i
+ * DevTools, ingen session/rate-limiting) med rigtig auth -- PBKDF2-hashet
+ * delt husstands-kodeord + HMAC-signerede session-tokens. Mønster og
+ * begrundelser porteret DIREKTE fra scraper-boilerplate's worker/src/
+ * auth.ts+middleware.ts+rateLimit.ts (framework-uafhaengig kerne, ingen
+ * Hono-afhaengighed traekkes ind her) -- se BACKLOG.md's G25 for detaljer.
+ *
+ * VIGTIGT (porteret laering, IKKE selv genopdaget her): sessionen sendes
+ * som "Authorization: Bearer <token>"-HEADER, ALDRIG en cookie. Et tidligere
+ * cookie-forsoeg i scraper-boilerplate fejlede reelt i Safari, fordi GitHub
+ * Pages (frontend) og denne Worker (API) ligger paa to FORSKELLIGE top-
+ * level-domaener -- det goer sessions-cookien third-party fra browserens
+ * synspunkt, og Safaris Intelligent Tracking Prevention blokerer ALLE
+ * third-party-cookies som standard (uanset SameSite). Login saa ud til at
+ * lykkes ét oejeblik og hoppede saa tilbage til login-siden. En Bearer-token
+ * gemt i localStorage og sendt som header rammer ikke den begraensning i
+ * NOGEN browser. PLAGGs frontend brugte allerede et localStorage-gemt
+ * header-moenster (den tidligere X-API-Key) -- kun selve tokenets INDHOLD
+ * og VALIDERING aendres, ikke selve transport-moenstret.
  *
  * Skema (se turso_io.py / planen "Turso-skema"): wishlist, matches, bundles,
  * control. matches/bundles filtreres altid på control.current_run_id
  * (generations-swap, se turso_io.py:write_matches_and_bundles).
  *
  * Endpoints:
+ *   POST   /api/login          — G25: {password} -> {ok, token}, rate-limited
+ *   POST   /api/logout         — G25: symmetri (stateless token, intet at tilbagekalde server-side)
  *   GET    /api/wishlist       — SELECT * FROM wishlist ORDER BY id
  *   POST   /api/wishlist       — validér (kun type påkrævet, G7) + INSERT
  *   DELETE /api/wishlist/:id   — DELETE WHERE id=?
@@ -49,16 +70,149 @@ function getCorsHeaders(request) {
   const origin = request.headers.get("Origin");
   const headers = {
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
+    // G25: "Authorization" erstatter "X-API-Key" -- sessionen sendes nu som
+    // en Bearer-token-header, ikke en raa delt noegle. INGEN "Access-Control-
+    // Allow-Credentials" -- den er kun relevant for cookie-baseret auth
+    // (som vi bevidst IKKE bruger, se modulets docstring).
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Vary": "Origin", // svaret afhaenger af Origin-headeren -- maa ikke caches paa tvaers af oprindelser
   };
-  // Ekko KUN den specifikke, whitelistede Origin tilbage (aldrig "*") --
-  // noedvendigt for at kunne tilfoeje "Access-Control-Allow-Credentials"
-  // senere (G25-sessions-cookies), som er uforenelig med en "*"-oprindelse.
+  // Ekko KUN den specifikke, whitelistede Origin tilbage (aldrig "*").
   if (isAllowedOrigin(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
   }
   return headers;
+}
+
+// ── G25: auth (PBKDF2-hashing + HMAC-signerede sessions) ────────────────────
+// Porteret 1:1 fra scraper-boilerplate/worker/src/auth.ts -- ren Web Crypto
+// API, INGEN tredjeparts-bibliotek, INGEN Hono-afhaengighed.
+
+// 100_000, IKKE et hoejere "mere sikkert" tal: Cloudflare Workers' AEGTE
+// produktions-crypto.subtle haandhaever et HAARDT loft paa 100.000 PBKDF2-
+// iterationer ("NotSupportedError: iteration counts above 100000 are not
+// supported"). Dette var et REELT fund i scraper-boilerplate (IKKE
+// selv genopdaget her): en tidligere 210.000-vaerdi bestod enhver unit-test
+// og "wrangler dev" (lokal simulation haandhaever IKKE graensen) -- men
+// ETHVERT login fejlede i den AEGTE deployede Worker, fordi verifyPassword()s
+// catch-all fangede NotSupportedError og returnerede false, umuligt at
+// skelne fra et forkert kodeord. AENDRES ALDRIG uden at genverificere mod en
+// RIGTIGT deployet Worker, ikke kun tests/wrangler dev.
+const PBKDF2_ITERATIONS = 100_000;
+const HASH_BYTE_LENGTH = 32;
+
+function toBase64Url(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = "";
+  for (const byte of arr) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(value) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (padded.length % 4)) % 4;
+  const binary = atob(padded + "=".repeat(pad));
+  const arr = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+  return arr;
+}
+
+async function pbkdf2(password, salt, iterations) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations }, keyMaterial, HASH_BYTE_LENGTH * 8
+  );
+  return new Uint8Array(bits);
+}
+
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const derived = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${toBase64Url(salt)}$${toBase64Url(derived)}`;
+}
+
+async function verifyPassword(password, stored) {
+  const parts = stored.split("$");
+  if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
+  const iterations = Number.parseInt(parts[1], 10);
+  if (!Number.isFinite(iterations) || iterations <= 0) return false;
+  try {
+    const salt = fromBase64Url(parts[2]);
+    const expected = fromBase64Url(parts[3]);
+    const actual = await pbkdf2(password, salt, iterations);
+    return constantTimeEqual(actual, expected);
+  } catch {
+    return false; // ugyldig base64url i en gemt hash -- kast ALDRIG paa daarligt input
+  }
+}
+
+async function hmacKey(secret) {
+  return crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
+  );
+}
+
+async function createSessionToken(payload, secret) {
+  const key = await hmacKey(secret);
+  const body = toBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
+  return `${body}.${toBase64Url(signature)}`;
+}
+
+async function verifySessionToken(token, secret) {
+  const [body, signature] = token.split(".");
+  if (!body || !signature) return null;
+  try {
+    const key = await hmacKey(secret);
+    const valid = await crypto.subtle.verify("HMAC", key, fromBase64Url(signature), new TextEncoder().encode(body));
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(body)));
+    if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) {
+      return null; // udloebet
+    }
+    return payload;
+  } catch {
+    return null; // ugyldigt token -- kast ALDRIG, behandl blot som uautentificeret
+  }
+}
+
+function parseBearerToken(header) {
+  if (!header || !header.startsWith("Bearer ")) return null;
+  const token = header.slice("Bearer ".length).trim();
+  return token || null;
+}
+
+// FRAMEWORK-UAFHAENGIG kerne (tager kun raa strenge) -- se modulets docstring.
+async function authenticateRequest(authorizationHeader, hmacSecret) {
+  const token = parseBearerToken(authorizationHeader);
+  if (!token) return null;
+  return verifySessionToken(token, hmacSecret);
+}
+
+// ── G25: login-rate-limiting (Workers KV) ────────────────────────────────────
+// Porteret 1:1 fra scraper-boilerplate/worker/src/rateLimit.ts. Bind et KV-
+// namespace som RATE_LIMIT_KV i wrangler.toml (oprettet via
+// `wrangler kv namespace create RATE_LIMIT_KV`).
+const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
+const RATE_LIMIT_MAX_ATTEMPTS = 5;
+
+async function checkAndIncrementLoginAttempts(kv, ip) {
+  const key = `login_attempts:${ip}`;
+  const current = Number.parseInt((await kv.get(key)) ?? "0", 10);
+  if (current >= RATE_LIMIT_MAX_ATTEMPTS) {
+    return { allowed: false };
+  }
+  await kv.put(key, String(current + 1), { expirationTtl: RATE_LIMIT_WINDOW_SECONDS });
+  return { allowed: true };
 }
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -141,17 +295,63 @@ export default {
       "Content-Type": "application/json",
     };
 
-    // Valider API-nøgle — alle endpoints kræver den
-    const apiKey = request.headers.get("X-API-Key");
-    if (!apiKey || apiKey !== env.API_KEY) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: responseHeaders,
-      });
-    }
+    const path = url.pathname;
 
     try {
-      const path = url.pathname;
+      // ── POST /api/login — G25, INGEN auth kraevet (det er selve login) ───
+      if (path === "/api/login" && request.method === "POST") {
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          body = {};
+        }
+        const password = typeof body.password === "string" ? body.password : "";
+        if (!password) {
+          return json({ error: "password er påkrævet" }, 400, responseHeaders);
+        }
+
+        // Rate-limit FOER selve kodeords-tjekket -- forhindrer et script i
+        // at gaette ubegraenset mange gange mod dette endpoint. Nøglet paa
+        // IP alene (ikke ogsaa brugernavn, som PLAGG ikke har -- ét delt
+        // husstands-kodeord, se BACKLOG.md's G25).
+        const ip = request.headers.get("CF-Connecting-IP") || "ukendt";
+        const { allowed } = await checkAndIncrementLoginAttempts(env.RATE_LIMIT_KV, ip);
+        if (!allowed) {
+          return json({ error: "for mange loginforsøg -- prøv igen senere" }, 429, responseHeaders);
+        }
+
+        const valid = await verifyPassword(password, env.PASSWORD_HASH);
+        if (!valid) {
+          return json({ error: "forkert adgangskode" }, 401, responseHeaders);
+        }
+
+        const maxAgeDays = Number(env.SESSION_TOKEN_MAX_AGE_DAYS || "30");
+        const maxAgeSeconds = maxAgeDays * 24 * 60 * 60;
+        const token = await createSessionToken(
+          { sub: "husstand", exp: Math.floor(Date.now() / 1000) + maxAgeSeconds },
+          env.SESSION_HMAC_SECRET
+        );
+        // Token i JSON-body, IKKE en cookie -- se modulets docstring om
+        // hvorfor (Safari ITP + third-party-cookie-blokering).
+        return json({ ok: true, token }, 200, responseHeaders);
+      }
+
+      // ── ALLE andre endpoints kraever en gyldig session ────────────────────
+      const session = await authenticateRequest(request.headers.get("Authorization"), env.SESSION_HMAC_SECRET);
+      if (!session) {
+        return json({ error: "Unauthorized" }, 401, responseHeaders);
+      }
+
+      // ── POST /api/logout — G25, symmetri ─────────────────────────────────
+      // Stateless token (ingen server-side sessions-lager) -- der er intet
+      // at tilbagekalde server-side. Selve "log ud" er frontend'en der
+      // sletter sit gemte token. Endpointet findes for symmetri/fremtidig
+      // brug (fx en denylist) og for at kraeve et gyldigt token foer det
+      // bekraefter noget.
+      if (path === "/api/logout" && request.method === "POST") {
+        return json({ ok: true }, 200, responseHeaders);
+      }
 
       // ── GET /api/wishlist ────────────────────────────────────────────────
       if (path === "/api/wishlist" && request.method === "GET") {
