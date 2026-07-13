@@ -29,18 +29,18 @@ omprioriterer.
 ```
 ID    Emne                              Prioritet     Status
 ----  --------------------------------  ------------  --------
-      TEKNISK SPOR (køres nu)
+      TEKNISK SPOR (100% DONE)
 G23   Sti-flytning (~/CC/) + trigger-   Size 3        DONE
       watcher launchd-konsolidering
-G24   Healthcheck-ping (healthchecks.io)Size 1        NÆSTE
+G24   Healthcheck-ping (healthchecks.io)Size 1        DONE
 G25   Rigtig auth (worker.js)           Size 5-6      DONE
 G26   Lås CORS                          Size 1        DONE
 G27   Turso: generations-moenster        N/A           AFKLARET (ingen aendring)
-G28   Secrets-scanning (gitleaks)       Size 2        TODO
-G29   matching/pricing -> scraper-core  Size 2        TODO (lav prioritet)
+G28   Secrets-scanning (gitleaks)       Size 2        DONE
+G29   matching/pricing -> scraper-core  Size 2        DONE
 ----  --------------------------------  ------------  --------
       BUSINESS-SPOR (efter teknisk spor, eller ved omprioritering)
-G30   Vinted-fragt: manuelt tjek-flow   TBD           BACKEND+UI DONE (afventer seeding)
+G30   Vinted-fragt: manuelt tjek-flow   TBD           DONE
 G22   Vinted: login-baseret fragt       Size 5-6      DELVIST BLOKERET
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
@@ -578,7 +578,7 @@ bundle. `watchdog.py`s `run_with_timeout()` (per-kilde timeout,
 supplement til `hang_guard.py`s proces-niveau watchdog) IKKE taget i
 brug -- lavere prioritet, ingen akut anledning. Size 2.
 
-**G30 (BACKEND+UI DONE, 2026-07-13 — afventer seeding, business #1) —
+**G30 (DONE, 2026-07-14, business #1) —
 Vinted-fragt: manuelt tjek-flow.** Erstatning for det automatisk-
 blokerede spor i G22. Esben: et menneske gennemfører selv et par
 checkout-klik i egen browser (løser en evt. CAPTCHA som menneske,
@@ -645,12 +645,19 @@ input, gem en observation, bekraeft den REELT naaede Turso, dialog
 lukker korrekt; ingen mobil-overflow ved 320px/375px (baade med og
 uden aaben dialog).
 
-**Afventer:** seeding af min. 10 observationer for Polen/Sverige/
-Finland (de hyppigst ramte lande) foer estimater rent faktisk vises i
-praksis -- systemet virker korrekt med 0 data (viser "ukendt" som i
-dag), saa dette blokerer IKKE selve funktionens korrekthed. Kan ikke
-gøres af Claude i denne session (ingen synlig/interaktiv browser paa
-denne homelab-server, se separat Claude-i-Chrome-prompt til Esben).
+**Seeding (2026-07-14):** Esben indsamlede manuelt 10 observationer pr.
+land for Polen/Sverige/Finland via Vinted-checkout (Claude-i-Chrome-
+prompten koert paa egen Mac). `seed_shipping_observations.py` (nyt,
+engangsscript) logger ind via `/api/login` (G25-token, IKKE en
+hardkodet API-key) og poster hver observation til
+`POST /api/shipping-observation`. Alle 30 registreret live i
+produktion, bekraeftet via `/api/shipping-estimates`:
+PL 37,51 kr. (10 obs.), SE 36,36 kr. (10 obs.), FI 62,79 kr. (10 obs.)
+-- alle tre over `MIN_SHIPPING_OBSERVATIONS`-graensen, saa estimater
+vises nu i praksis i stedet for "ukendt" ved naeste koersel. Lav
+varians indenfor hvert land (Vinted-fragt er ofte en fast pris pr.
+land/vaegtklasse uafhaengigt af saelger) -- forventet, ikke en fejl i
+indsamlingen.
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 
