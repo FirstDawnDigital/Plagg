@@ -391,7 +391,7 @@ overlever nu crashes/genstart, ligesom `com.local.personal-shopper`
 røres aldrig uden eksplicit instruks). Verificeret: begge nye
 launchd-jobs kører, ingen fejl i logs efter genstart.
 
-**G24 (KODE DONE, 2026-07-13 — afventer Esbens URL) — Healthcheck-ping.**
+**G24 (DONE, 2026-07-13) — Healthcheck-ping.**
 `scraper-core` tilføjet som git-dependency i `requirements.txt`
 (`pip install git+https://github.com/fddigi/scraper-boilerplate.git@main
 #subdirectory=packages/scraper-core`, verificeret installerbart med
@@ -411,11 +411,14 @@ rammer base-URL'en og `ping_fail()` rammer `/fail`-suffikset korrekt;
 tilsigtet); (4) en ÆGTE (ikke dry-run) kørsel af `monitor.py` mod en
 lokal dummy-healthcheck-server bekræftede PRÆCIS ét success-ping
 modtaget, SAMTIDIG med at både Sheets og Turso blev skrevet korrekt --
-ingen regression i eksisterende output. **Afventer kun Esben:** oprette
-et NYT healthchecks.io-check specifikt til PLAGG (ekstern SaaS-konto,
-kan ikke gøres af Claude) og tilføje `HEALTHCHECK_URL=<url>` til
-`secrets.env`. Uden det er linjen 100% harmløs (no-op), som testet.
-Size 1.
+ingen regression i eksisterende output. Esben oprettede sit
+healthchecks.io-check og tilføjede URL'en til `secrets.env` (fandt
+undervejs: nøglen hed ved en fejl `HEALTHCHECK_IO_URL`, ikke
+`HEALTHCHECK_URL` som koden læser -- rettet). **Verificeret LIVE mod
+den ægte produktionskørsel** (kl. 07:12-07:14): ingen fejl/advarsler i
+`monitor.log` omkring kørslen, Sheets+Turso begge korrekt opdateret
+(21 matches, 1 bundle) -- healthcheck-pinget er bevidst tavst ved
+succes, så fraværet af fejl-linjer bekræfter et vellykket ping. Size 1.
 
 **G25 (TODO, afventer valg) — Rigtig auth i `worker.js`.** I dag: ét
 delt `X-API-Key`, synligt for enhver i DevTools, ingen session, ingen
