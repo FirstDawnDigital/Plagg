@@ -22,6 +22,13 @@ logger = logging.getLogger("personal_shopper.bundling")
 # er lette at tilføje her uden at røre selve bundle-algoritmen.
 NON_BUNDLEABLE_SOURCES = {"sellpy"}
 
+# G30: minimum antal manuelt indsamlede fragt-observationer for et land FOER
+# et landegennemsnit bruges som et estimat i stedet for at vise "ukendt" --
+# SAMME graense som turso_io.MIN_SHIPPING_OBSERVATIONS (duplikeret her, ikke
+# importeret, for at bundling.py forbliver en ren funktion uden Turso-
+# afhaengighed -- den modtager blot allerede-hentede tal som argument).
+MIN_SHIPPING_OBSERVATIONS = 10
+
 
 def _seller_key(match: dict) -> str:
     """Saelger-ID hvis vi kunne udtraekke det (se sources/reshopper.py og
@@ -43,14 +50,52 @@ def _seller_key(match: dict) -> str:
     return f"{source}|navn:{(match.get('seller_name') or 'ukendt').strip().lower()}"
 
 
-def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> list[dict]:
+def apply_shipping_estimates(matches: list[dict], country_shipping_estimates: dict | None) -> None:
+    """G30: beriger matches IN-PLACE med 'shipping_price_estimate'/
+    'shipping_price_estimate_count' -- KUN naar den reelle 'shipping_price'
+    er ukendt, saelgerlandet er kendt og udenlandsk, og landet har mindst
+    MIN_SHIPPING_OBSERVATIONS manuelt indsamlede observationer (se
+    turso_io.get_shipping_estimates()). Koeres FOER build_bundles(), saa
+    BAADE individuelle matches (Matches-listen, enkelt-item-saelgere) OG
+    bundles (via samme grundlag) konsekvent viser samme landegennemsnit --
+    'shipping_price' (det bekraeftede felt) roeres ALDRIG, kun det nye,
+    adskilte estimat-felt tilfoejes."""
+    for m in matches:
+        m.setdefault("shipping_price_estimate", None)
+        m.setdefault("shipping_price_estimate_count", None)
+        if not country_shipping_estimates:
+            continue
+        if m.get("shipping_price") is not None:
+            continue  # allerede en bekraeftet pris -- intet estimat noedvendigt
+        country = m.get("seller_country")
+        if not country or country == "DK":
+            continue
+        candidate = country_shipping_estimates.get(country)
+        if candidate and candidate.get("count", 0) >= MIN_SHIPPING_OBSERVATIONS:
+            m["shipping_price_estimate"] = candidate["avg"]
+            m["shipping_price_estimate_count"] = candidate["count"]
+
+
+def build_bundles(
+    matches: list[dict], default_shipping_dkk: float = 39.0,
+    country_shipping_estimates: dict | None = None,
+) -> list[dict]:
     """Grupperer matches pr. saelger og beregner bundle-oekonomi.
     Returnerer bundle-dicts sorteret efter stoerst besparelse pr. item foerst.
 
     J5: matches fra NON_BUNDLEABLE_SOURCES (fx Sellpy, konsignation) danner
     ALDRIG en bundle, uanset antal -- de springes over her og optraeder
     derfor KUN i Matches-listen (all_matches), aldrig i Bundles. Se
-    modulets NON_BUNDLEABLE_SOURCES-konstant og BACKLOG.md's J5-fund."""
+    modulets NON_BUNDLEABLE_SOURCES-konstant og BACKLOG.md's J5-fund.
+
+    G30: 'country_shipping_estimates' er et valgfrit {land: {"avg", "count"}}
+    -dict (se turso_io.get_shipping_estimates()) af manuelt indsamlede fragt-
+    observationer. None (default) bevarer PRAECIS G21-fixets adfaerd
+    (kendt udenlandsk saelger uden reel fragt -> "ukendt", ingen antagelse).
+    Naar dict'et ER givet OG landet har >= MIN_SHIPPING_OBSERVATIONS: bruges
+    landegennemsnittet som et EKSPLICIT maerket estimat (adskilt fra et
+    bekraeftet 'shipping_price' og fra den danske 'default_shipping_dkk'-
+    antagelse) -- se 'shipping_is_country_estimate' i det returnerede dict."""
     by_seller = defaultdict(list)
     for m in matches:
         source = (m.get("source") or "").strip().lower()
@@ -81,12 +126,35 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
         known_countries = {m.get("seller_country") for m in items if m.get("seller_country")}
         is_known_foreign = bool(known_countries) and known_countries != {"DK"}
 
+        # G30: landegennemsnit -- KUN relevant naar vi IKKE allerede har en
+        # bekraeftet fragtpris, og saelgeren er et KENDT enkelt udenlandsk
+        # land (en bundle er altid samme saelger, saa known_countries har
+        # hoejst ét element her naar is_known_foreign er True).
+        country_estimate = None
+        country_estimate_count = 0
+        if country_shipping_estimates and is_known_foreign:
+            country = next(iter(known_countries))
+            candidate = country_shipping_estimates.get(country)
+            if candidate and candidate.get("count", 0) >= MIN_SHIPPING_OBSERVATIONS:
+                country_estimate = candidate["avg"]
+                country_estimate_count = candidate["count"]
+
+        shipping_is_country_estimate = False
         if shipping_values:
             # Fragt er pr. ORDRE, ikke pr. item -- vi antager saelgerens fragtpris
             # er ens paa tvaers af egne annoncer. Bruger den hoejeste observerede
             # vaerdi som et konservativt (ikke-optimistisk) bud paa den reelle pris.
             shipping = max(shipping_values)
             shipping_is_assumed = False
+        elif country_estimate is not None:
+            # G30: manuelt indsamlet landegennemsnit -- IKKE en bekraeftet
+            # pris for DENNE specifikke saelger, men et data-baseret estimat
+            # (min. MIN_SHIPPING_OBSERVATIONS observationer), langt mere
+            # praecist end den tidligere danske 39kr-antagelse ville have
+            # vaeret for en udenlandsk saelger.
+            shipping = country_estimate
+            shipping_is_assumed = False
+            shipping_is_country_estimate = True
         elif is_known_foreign:
             shipping = None
             shipping_is_assumed = False
@@ -124,6 +192,8 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
             "total_item_price": round(total_item_price, 2),
             "shipping_dkk": shipping,
             "shipping_is_assumed": shipping_is_assumed,
+            "shipping_is_country_estimate": shipping_is_country_estimate,
+            "shipping_estimate_count": country_estimate_count if shipping_is_country_estimate else None,
             "shipping_unknown_foreign": is_known_foreign and shipping is None,
             "total_with_shipping": total_with_shipping,
             "effective_price_per_item": effective_price_per_item,
@@ -133,7 +203,10 @@ def build_bundles(matches: list[dict], default_shipping_dkk: float = 39.0) -> li
             # Lokal afhentning-bonus: KUN naar vi har positiv bekraeftelse af 0-kr
             # fragt fra schema.org-dataen -- manglende fragt-info er IKKE det samme
             # som bekraeftet gratis afhentning (kan ogsaa vaere manglende data).
-            "local_pickup_bonus": (not shipping_is_assumed) and shipping == 0,
+            # G30: et estimat kan (i teorien, ekstremt usandsynligt) ramme
+            # praecis 0 -- udelukkes eksplicit her, da "gratis fragt" kun
+            # boer vises ved en BEKRAEFTET 0-kr-pris, aldrig et gennemsnit.
+            "local_pickup_bonus": (not shipping_is_assumed) and (not shipping_is_country_estimate) and shipping == 0,
         })
 
     # En "bundle" giver kun mening med 2+ items -- ellers er der ingen delt

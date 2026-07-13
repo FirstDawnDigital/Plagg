@@ -65,7 +65,31 @@ SCHEMA_STATEMENTS = [
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )""",
     "INSERT OR IGNORE INTO control (id) VALUES (1)",
+    # G30: manuelt indsamlede fragt-observationer pr. land (Vinted-fragt kan
+    # ikke hentes automatiseret, se BACKLOG.md's G22/G30 -- et menneske
+    # tjekker selv den rigtige fragt ved et checkout-klik og rapporterer den
+    # tilbage via webappens blyant-dialog). ÉT raekke PR. OBSERVATION (ikke
+    # en overskrivning) -- gennemsnittet beregnes ved LAESNING, saa historik
+    # bevares, og flere observationer over tid goer estimatet mere praecist.
+    # Overlever BEVIDST at de underliggende annoncer forsvinder fra matches/
+    # bundles (generations-swap rammer IKKE denne tabel) -- landets fragt-
+    # niveau aendrer sig ikke bare fordi en konkret annonce ikke laengere
+    # er til salg.
+    """CREATE TABLE IF NOT EXISTS shipping_observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL DEFAULT 'vinted',
+        country TEXT NOT NULL,
+        shipping_price REAL NOT NULL,
+        observed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_shipping_obs_country ON shipping_observations(source, country)",
 ]
+
+# G30: minimum antal observationer for et land FOER vi viser et estimat i
+# stedet for "ukendt" -- et gennemsnit af 1-2 datapunkter er ikke
+# repraesentativt og ville risikere at vise et lige saa vildledende tal som
+# den oprindelige (fjernede) danske 39kr-antagelse for udenlandske saelgere.
+MIN_SHIPPING_OBSERVATIONS = 10
 
 
 def load_turso_config(secrets_path: str = "secrets.env") -> tuple[str, str]:
@@ -159,27 +183,36 @@ def _num(value, cast):
 
 
 def ensure_schema(turso_url: str, token: str) -> None:
-    """CREATE TABLE IF NOT EXISTS x4 + INSERT OR IGNORE control-singleton.
+    """CREATE TABLE IF NOT EXISTS x5 + INSERT OR IGNORE control-singleton.
     Idempotent, tænkt kaldt hver monitor.py-koersel.
 
-    G16: 'seller_country' er en NY kolonne paa en tabel der allerede findes
-    i PRODUKTION (den live Turso-database) -- CREATE TABLE IF NOT EXISTS
-    roerer IKKE en eksisterende tabel, saa kolonnen tilfoejes separat via
-    PRAGMA table_info + ALTER TABLE (samme idempotente moenster som
-    db.py:ensure_schema() bruger for den lokale SQLite-db)."""
+    G16/G30: nye kolonner paa tabeller der allerede findes i PRODUKTION
+    (den live Turso-database) -- CREATE TABLE IF NOT EXISTS roerer IKKE en
+    eksisterende tabel, saa kolonner tilfoejes separat via PRAGMA table_info
+    + ALTER TABLE (samme idempotente moenster som db.py:ensure_schema()
+    bruger for den lokale SQLite-db)."""
     _pipeline(turso_url, token, [{"sql": s, "args": []} for s in SCHEMA_STATEMENTS])
-    _ensure_matches_seller_country_column(turso_url, token)
+    _ensure_column(turso_url, token, "matches", "seller_country", "TEXT")  # G16
+    _ensure_column(turso_url, token, "matches", "shipping_price_estimate", "REAL")  # G30
+    _ensure_column(turso_url, token, "matches", "shipping_price_estimate_count", "INTEGER")  # G30
+    _ensure_column(turso_url, token, "bundles", "shipping_is_country_estimate", "INTEGER")  # G30
+    _ensure_column(turso_url, token, "bundles", "shipping_estimate_count", "INTEGER")  # G30
     logger.info("Turso: skema bekraeftet/oprettet")
 
 
-def _ensure_matches_seller_country_column(turso_url: str, token: str) -> None:
-    result = _pipeline(turso_url, token, [{"sql": "PRAGMA table_info(matches)", "args": []}])
+def _ensure_column(turso_url: str, token: str, table: str, column: str, sql_type: str) -> None:
+    """Generisk idempotent 'tilfoej kolonne hvis den mangler'-helper -- se
+    ensure_schema()'s docstring. 'table'/'column'/'sql_type' er ALTID
+    hardcodede opkalds-konstanter internt i denne fil (aldrig bruger-input),
+    saa direkte streng-interpolation i ALTER TABLE (som ikke kan parameter-
+    bindes for identifikatorer alligevel) er trygt her."""
+    result = _pipeline(turso_url, token, [{"sql": f"PRAGMA table_info({table})", "args": []}])
     existing_columns = {row["name"] for row in _rows_as_dicts(result[0])}
-    if "seller_country" not in existing_columns:
+    if column not in existing_columns:
         _pipeline(turso_url, token, [
-            {"sql": "ALTER TABLE matches ADD COLUMN seller_country TEXT", "args": []},
+            {"sql": f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}", "args": []},
         ])
-        logger.info("Turso: 'seller_country'-kolonne tilfoejet til matches (G16)")
+        logger.info("Turso: '%s'-kolonne tilfoejet til %s", column, table)
 
 
 def load_wishlist_from_turso(turso_url: str, token: str) -> list[dict]:
@@ -252,8 +285,8 @@ def write_matches_and_bundles(
                 (run_id, db_id, url, item_id, source, title, match_rank, price,
                  size, brand, stand, seller_name, seller_id, wishlist_type,
                  wishlist_maerke, wishlist_stoerrelse, shipping_price, first_seen,
-                 seller_country)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 seller_country, shipping_price_estimate, shipping_price_estimate_count)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             "args": [
                 run_id, db_id, m.get("url"), m.get("item_id"), m.get("source"),
                 m.get("title"), m.get("match_rank"), _num(m.get("price"), float),
@@ -261,6 +294,8 @@ def write_matches_and_bundles(
                 m.get("seller_id"), m.get("wishlist_type"), m.get("wishlist_maerke"),
                 m.get("wishlist_stoerrelse"), _num(m.get("shipping_price"), float),
                 first_seen, m.get("seller_country"),
+                _num(m.get("shipping_price_estimate"), float),
+                _num(m.get("shipping_price_estimate_count"), int),
             ],
         })
     for i in range(0, len(match_stmts), BATCH_SIZE):
@@ -275,8 +310,9 @@ def write_matches_and_bundles(
                 (run_id, seller_key, seller_name, seller_id, source, item_count,
                  items_json, total_item_price, shipping_dkk, shipping_is_assumed,
                  total_with_shipping, effective_price_per_item, alone_price_per_item,
-                 savings_per_item, bundle_worth_it, local_pickup_bonus)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 savings_per_item, bundle_worth_it, local_pickup_bonus,
+                 shipping_is_country_estimate, shipping_estimate_count)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             "args": [
                 run_id, b.get("seller_key"), b.get("seller_name"), b.get("seller_id"),
                 b.get("source"), _num(b.get("item_count"), int),
@@ -286,6 +322,8 @@ def write_matches_and_bundles(
                 _num(b.get("effective_price_per_item"), float), _num(b.get("alone_price_per_item"), float),
                 _num(b.get("savings_per_item"), float), bool(b.get("bundle_worth_it")),
                 bool(b.get("local_pickup_bonus")),
+                bool(b.get("shipping_is_country_estimate")),
+                _num(b.get("shipping_estimate_count"), int),
             ],
         })
     for i in range(0, len(bundle_stmts), BATCH_SIZE):
@@ -360,3 +398,39 @@ def finish_run(turso_url: str, token: str, status_text: str, last_run_text: str)
             "args": [status_text, last_run_text],
         },
     ])
+
+
+def add_shipping_observation(turso_url: str, token: str, source: str, country: str, shipping_price: float) -> None:
+    """G30: registrerer ÉT nyt manuelt observeret fragt-datapunkt for et
+    land (fx indsendt via webappens blyant-dialog, eller et seeding-script).
+    Overskriver ALDRIG en tidligere observation -- hver observation er sin
+    egen raekke, saa gennemsnittet (se get_shipping_estimates()) bliver mere
+    praecist over tid i stedet for at den seneste indtastning bare erstatter
+    den forrige."""
+    _pipeline(turso_url, token, [
+        {
+            "sql": "INSERT INTO shipping_observations (source, country, shipping_price) VALUES (?, ?, ?)",
+            "args": [source, country.upper().strip(), shipping_price],
+        },
+    ])
+
+
+def get_shipping_estimates(turso_url: str, token: str, source: str = "vinted") -> dict:
+    """G30: {land: {"avg": float, "count": int}} for ALLE lande med mindst
+    ÉN observation for denne kilde -- selve MIN_SHIPPING_OBSERVATIONS-
+    graensen haandhaeves IKKE her (kaldere skal selv tjekke 'count' foer de
+    viser et estimat som troværdigt, se bundling.py/docs/index.html) -- paa
+    den maade kan en UI ogsaa vise "kun 3/10 observationer indsamlet endnu"
+    i stedet for enten et fuldt tal eller slet intet."""
+    results = _pipeline(turso_url, token, [
+        {
+            "sql": """SELECT country, AVG(shipping_price) as avg_price, COUNT(*) as n
+                      FROM shipping_observations WHERE source = ? GROUP BY country""",
+            "args": [source],
+        },
+    ])
+    rows = _rows_as_dicts(results[0])
+    return {
+        row["country"]: {"avg": round(float(row["avg_price"]), 2), "count": int(row["n"])}
+        for row in rows
+    }

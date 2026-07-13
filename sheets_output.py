@@ -140,6 +140,33 @@ def _format_kr(value, note: str = "") -> str:
     return f"{num_str} kr.{note}"
 
 
+def _match_shipping_display(m: dict) -> str:
+    """G30: viser en BEKRAEFTET fragtpris hvis kendt (uaendret adfaerd),
+    ELLERS et manuelt indsamlet landegennemsnits-ESTIMAT hvis nok
+    observationer findes (se bundling.apply_shipping_estimates()), ELLERS
+    en tom celle -- ALDRIG et stille gaet, samme princip som _format_kr()."""
+    if m.get("shipping_price") is not None:
+        return _format_kr(m["shipping_price"])
+    estimate = m.get("shipping_price_estimate")
+    if estimate is not None:
+        count = m.get("shipping_price_estimate_count") or 0
+        return _format_kr(estimate, note=f" (estimat, {count} obs.)")
+    return ""
+
+
+def _bundle_shipping_note(b: dict) -> str:
+    """G30: udvider den eksisterende '(antaget)'-note med en tredje
+    tilstand -- '(estimat, N obs.)' for et landegennemsnit (se
+    bundling.build_bundles()) -- adskilt fra baade en bekraeftet pris
+    (ingen note) og den danske indenrigs-antagelse (fortsat '(antaget)')."""
+    if b.get("shipping_is_assumed"):
+        return " (antaget)"
+    if b.get("shipping_is_country_estimate"):
+        count = b.get("shipping_estimate_count") or 0
+        return f" (estimat, {count} obs.)"
+    return ""
+
+
 def _items_summary(items: list[dict]) -> str:
     """H4: 'Varer i bundle'-teksten nummererer ens-udseende items (samme
     titel) inden for samme bundle -- '#1'/'#2' -- saa fx to Michelle A
@@ -436,7 +463,7 @@ def write_matches(spreadsheet, matches: list[dict], first_seen_lookup: dict, now
             m.get("seller_name", "ukendt"),
             seller_country,
             wl_ref,
-            _format_kr(m.get("shipping_price")),
+            _match_shipping_display(m),
             first_seen[:16] if first_seen else "",
             now_str,
         ])
@@ -489,7 +516,7 @@ def write_bundles(spreadsheet, bundles: list[dict], now_str: str) -> int:
             _items_summary(items),
             *link_cells,
             b.get("total_item_price", ""),
-            _format_kr(b.get("shipping_dkk"), note=" (antaget)" if b.get("shipping_is_assumed") else ""),
+            _format_kr(b.get("shipping_dkk"), note=_bundle_shipping_note(b)),
             _or_blank(b.get("total_with_shipping")),
             _or_blank(b.get("effective_price_per_item")),
             _or_blank(b.get("alone_price_per_item")),
@@ -541,7 +568,7 @@ def write_local_csv_fallback(matches: list[dict], bundles: list[dict], first_see
                 m.get("match_rank", ""), m.get("price", ""),
                 m.get("size", ""), m.get("brand", "") or "", _display_stand(m.get("stand", "ukendt")),
                 m.get("seller_name", "ukendt"), wl_ref,
-                _format_kr(m.get("shipping_price")), first_seen[:16] if first_seen else "", now_str,
+                _match_shipping_display(m), first_seen[:16] if first_seen else "", now_str,
             ])
     bundles_path = os.path.join(out_dir, "bundles_fallback.csv")
     max_items = max((b.get("item_count", 1) for b in bundles), default=1)
@@ -561,7 +588,7 @@ def write_local_csv_fallback(matches: list[dict], bundles: list[dict], first_see
                 b.get("item_count", 0), _items_summary(items),
                 *link_cells,
                 b.get("total_item_price", ""),
-                _format_kr(b.get("shipping_dkk"), note=" (antaget)" if b.get("shipping_is_assumed") else ""),
+                _format_kr(b.get("shipping_dkk"), note=_bundle_shipping_note(b)),
                 _or_blank(b.get("total_with_shipping")), _or_blank(b.get("effective_price_per_item")),
                 _or_blank(b.get("alone_price_per_item")), _or_blank(b.get("savings_per_item")),
                 _bundle_worth_it_text(b),

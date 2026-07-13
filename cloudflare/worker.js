@@ -20,6 +20,8 @@
  *   GET    /api/bundles        — samme filter + JSON.parse(items_json)
  *   GET    /api/status         — control-rækken (status/run_now/last_run_at/last_tldr)
  *   POST   /api/trigger        — UPDATE control SET run_now = 1
+ *   GET    /api/shipping-estimates  — G30: {land: {avg, count}} pr. kilde
+ *   POST   /api/shipping-observation — G30: registrér ét nyt fragt-datapunkt
  */
 
 // G26: CORS laast til en eksplicit allow-liste i stedet for den tidligere
@@ -253,6 +255,62 @@ export default {
           "UPDATE control SET run_now = 1, updated_at = datetime('now') WHERE id = 1"
         );
         return json({ ok: true }, 200, responseHeaders);
+      }
+
+      // ── GET /api/shipping-estimates — G30 ────────────────────────────────
+      // {land: {avg, count}} for ALLE lande med mindst ÉN observation for
+      // 'source' (default "vinted") -- samme form som turso_io.py's
+      // get_shipping_estimates(), saa webappen kan bruge samme struktur.
+      // MIN_SHIPPING_OBSERVATIONS-graensen haandhaeves IKKE her (se
+      // turso_io.py's docstring) -- klienten tjekker selv 'count'.
+      if (path === "/api/shipping-estimates" && request.method === "GET") {
+        const source = url.searchParams.get("source") || "vinted";
+        const rows = await tursoExecute(
+          env,
+          `SELECT country, AVG(shipping_price) as avg_price, COUNT(*) as n
+           FROM shipping_observations WHERE source = ? GROUP BY country`,
+          [{ type: "text", value: source }]
+        );
+        const estimates = {};
+        for (const r of rows) {
+          estimates[r.country] = { avg: Math.round(r.avg_price * 100) / 100, count: r.n };
+        }
+        return json(estimates, 200, responseHeaders);
+      }
+
+      // ── POST /api/shipping-observation — G30 ─────────────────────────────
+      // Body: {country, shipping_price, source?}. Registrerer ÉT nyt
+      // manuelt observeret fragt-datapunkt (fra webappens blyant-dialog,
+      // eller et seeding-script) -- overskriver ALDRIG en tidligere
+      // observation, se turso_io.py's add_shipping_observation()-docstring.
+      if (path === "/api/shipping-observation" && request.method === "POST") {
+        const d = await request.json();
+        const countryStr = typeof d.country === "string" ? d.country.trim().toUpperCase() : "";
+        const sourceStr = typeof d.source === "string" && d.source.trim() ? d.source.trim() : "vinted";
+        const priceNum = Number(d.shipping_price);
+
+        // Serverside-validering (samme princip som POST /api/wishlist ovenfor)
+        // -- et ISO 3166-1 alpha-2-landekode-format (2 bogstaver), en positiv,
+        // realistisk fragtpris (graenser valgt rummeligt, ikke en praecis
+        // forretningsregel -- blot for at fange indtastningsfejl som "4500"
+        // for "45,00" eller en negativ/nul-vaerdi).
+        if (!/^[A-Z]{2}$/.test(countryStr)) {
+          return json({ error: "country skal være en 2-bogstavs landekode (fx 'PL')" }, 400, responseHeaders);
+        }
+        if (!Number.isFinite(priceNum) || priceNum <= 0 || priceNum > 2000) {
+          return json({ error: "shipping_price skal være et positivt tal (maks. 2000 kr.)" }, 400, responseHeaders);
+        }
+
+        await tursoExecute(
+          env,
+          "INSERT INTO shipping_observations (source, country, shipping_price) VALUES (?, ?, ?)",
+          [
+            { type: "text", value: sourceStr },
+            { type: "text", value: countryStr },
+            { type: "float", value: priceNum },
+          ]
+        );
+        return json({ ok: true }, 201, responseHeaders);
       }
 
       return json({ error: "Not found" }, 404, responseHeaders);

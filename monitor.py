@@ -124,6 +124,7 @@ def run_source(
     wishlist: list[dict],
     dry_run: bool,
     cached_details: dict | None = None,
+    country_shipping_estimates: dict | None = None,
 ) -> tuple[list[dict], list[dict], bool, list[dict]]:
     """Koerer én kilde (reshopper/dba/sellpy/vinted -- alle foelger samme
     to-fase fetch()/fetch_details()-kontrakt, se sources/*.py) i eget
@@ -278,7 +279,14 @@ def run_source(
                 detail_cached_candidates.append(dict(listing))
 
         matches = matching.match_all(wishlist, enriched)
-        bundles = bundling.build_bundles(matches, config.get("bundling", {}).get("default_shipping_dkk", 39.0))
+        # G30: beriger matches med et landegennemsnits-fragt-estimat FOER
+        # build_bundles(), saa baade Matches-listen og Bundles-listen viser
+        # samme tal for samme land -- se apply_shipping_estimates()'s docstring.
+        bundling.apply_shipping_estimates(matches, country_shipping_estimates)
+        bundles = bundling.build_bundles(
+            matches, config.get("bundling", {}).get("default_shipping_dkk", 39.0),
+            country_shipping_estimates=country_shipping_estimates,
+        )
         return matches, bundles, True, detail_cached_candidates
     except Exception:
         logger.exception("%s: kilden fejlede, springer over -- resten af scriptet paavirkes ikke", source_name)
@@ -407,6 +415,23 @@ def main() -> int:
         # docstring for hvorfor samtidig laesning fra flere traade er sikkert.
         cached_details = db.cached_details_map(conn)
         logger.info("Detalje-cache: %d annonce(r) med genbrugelige detaljer fundet i %s", len(cached_details), config.get("db_path", "seen.db"))
+
+        # G30: manuelt indsamlede fragt-observationer pr. land, laest ÉN gang
+        # her i hovedtraaden (samme moenster som cached_details ovenfor) og
+        # givet read-only videre til hver kildes run_source()-kald. Tom dict
+        # (ikke en fejl) hvis Turso ikke er konfigureret -- estimat-berigelsen
+        # er da bare en no-op, se bundling.apply_shipping_estimates().
+        country_shipping_estimates = {}
+        if turso_url and turso_token:
+            try:
+                country_shipping_estimates = turso_io.get_shipping_estimates(turso_url, turso_token)
+                logger.info(
+                    "Fragt-estimater: %d land(e) med manuelt indsamlede observationer",
+                    len(country_shipping_estimates),
+                )
+            except Exception:
+                logger.warning("Turso: kunne ikke hente fragt-estimater -- fortsaetter uden (viser 'ukendt')", exc_info=True)
+
         now_iso = datetime.datetime.utcnow().isoformat()
 
         sources_to_run = [args.source] if args.source else list(SOURCE_MODULES.keys())
@@ -502,7 +527,7 @@ def main() -> int:
                 if source_module is None:
                     logger.warning("Ukendt kilde konfigureret: %s, springer over", name)
                     continue
-                future = executor.submit(run_source, name, source_module, config, wishlist, args.dry_run, cached_details)
+                future = executor.submit(run_source, name, source_module, config, wishlist, args.dry_run, cached_details, country_shipping_estimates)
                 future_to_name[future] = name
 
             for future in concurrent.futures.as_completed(future_to_name):

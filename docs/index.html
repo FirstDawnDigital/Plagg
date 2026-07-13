@@ -142,6 +142,16 @@
      ikke begravet som blot ét felt blandt mange. */
   .price-line { font-size: 14px; color: var(--text); }
   .price-line b { font-weight: 700; }
+  /* G30: fragt-estimat-link + blyant-rapportér-knap. Linket er bevidst
+     et almindeligt <a>, ikke fed/farvet som en total-vaerdi -- det er et
+     ESTIMAT, ikke et bekraeftet tal, og skal ikke se ligevaerdigt ud med
+     en rigtig pris. */
+  .shipping-estimate-link { color: var(--blue); text-decoration: underline; }
+  .pencil-btn {
+    border: none; background: transparent; cursor: pointer; font-size: 13px;
+    padding: 2px 4px; margin-left: 2px; opacity: 0.7; vertical-align: middle;
+  }
+  .pencil-btn:hover { opacity: 1; }
   .match-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
   .match-meta b { color: var(--text); }
   .stand-warn { color: var(--red); font-weight: 700; }
@@ -425,6 +435,82 @@
     input.addEventListener("keydown", e => { if (e.key === "Enter") attempt(); });
   }
 
+  // G30: blyant-dialog -- rapportér den rigtige fragt for et land (set ved
+  // selv at klikke gennem checkout paa den aegte annonce, se linket i
+  // priceLineHtml()). Gemmer ét nyt observations-datapunkt (POST /api/
+  // shipping-observation), overskriver ALDRIG en tidligere indtastning --
+  // backend'en tager et loebende gennemsnit (se turso_io.py).
+  function showShippingObservationDialog(country, source) {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
+      position:fixed;inset:0;background:rgba(15,23,42,0.75);
+      display:flex;align-items:center;justify-content:center;z-index:9999;
+    `;
+    overlay.innerHTML = `
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;
+                  padding:22px;max-width:320px;width:90%;box-sizing:border-box;">
+        <h3 style="margin:0 0 8px;font-size:16px;color:var(--text);">Rapportér rigtig fragt</h3>
+        <p style="margin:0 0 14px;font-size:13px;color:var(--muted);">
+          Hvad var den reelle fragtpris til Danmark fra denne ${escapeHtml(country)}-sælger
+          (set ved selve checkout)?
+        </p>
+        <input id="obs-price-input" type="number" min="1" step="1" placeholder="fx 55" inputmode="numeric"
+          style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--bg);color:var(--text);font-size:15px;box-sizing:border-box;
+                 margin-bottom:6px;" />
+        <div id="obs-error" style="color:var(--red);font-size:13px;min-height:18px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;">
+          <button id="obs-cancel-btn" style="flex:1;padding:10px;border:1px solid var(--border);
+                  border-radius:8px;background:transparent;color:var(--text);cursor:pointer;">Annullér</button>
+          <button id="obs-save-btn" style="flex:1;padding:10px;border:none;border-radius:8px;
+                  background:var(--blue);color:#fff;font-weight:600;cursor:pointer;">Gem</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector("#obs-price-input");
+    const errEl = overlay.querySelector("#obs-error");
+    const saveBtn = overlay.querySelector("#obs-save-btn");
+    input.focus();
+
+    function close() { overlay.remove(); }
+    overlay.querySelector("#obs-cancel-btn").addEventListener("click", close);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+    async function save() {
+      const price = Number(input.value);
+      if (!Number.isFinite(price) || price <= 0) {
+        errEl.textContent = "Angiv en gyldig fragtpris i kr. (større end 0).";
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Gemmer…";
+      try {
+        const res = await apiFetch("/api/shipping-observation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ country, source, shipping_price: price }),
+        });
+        if (res.ok) {
+          close();
+          loadMatchesAndBundles(); // genindlaes saa et evt. nyt estimat vises straks
+        } else {
+          const data = await res.json().catch(() => ({}));
+          errEl.textContent = data.error || "Kunne ikke gemme -- prøv igen.";
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Gem";
+        }
+      } catch {
+        errEl.textContent = "Netværksfejl -- prøv igen.";
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Gem";
+      }
+    }
+
+    saveBtn.addEventListener("click", save);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") save(); });
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
   function escapeHtml(s) {
     return String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -626,7 +712,7 @@
               ? `<span>Fragt: ukendt (udenlandsk sælger, se detaljer)</span>`
               : `<span><b>${fmtKr(b.effective_price_per_item)}</b>/stk.</span>
                  <span>Besparelse: <b>${fmtKr(b.savings_per_item)}</b>/stk.</span>
-                 <span>Fragt: ${fmtKr(b.shipping_dkk)}${b.shipping_is_assumed ? ' (antaget)' : ''}</span>`}
+                 <span>Fragt: ${fmtKr(b.shipping_dkk)}${b.shipping_is_assumed ? ' (antaget)' : ''}${b.shipping_is_country_estimate ? ` (estimat, ${b.shipping_estimate_count} obs.)` : ''}</span>`}
           </div>
           <div class="bundle-items">${itemLinks}</div>
         </div>
@@ -650,10 +736,27 @@
 
   function priceLineHtml(m) {
     const total = matchTotal(m);
-    if (total === null) {
-      return `Vare: <b>${fmtKr(m.price)}</b> · Fragt: ukendt`;
+    if (total !== null) {
+      return `Vare: ${fmtKr(m.price)} · Fragt: ${fmtKr(m.shipping_price)} · Total: <b>${fmtKr(total)}</b>`;
     }
-    return `Vare: ${fmtKr(m.price)} · Fragt: ${fmtKr(m.shipping_price)} · Total: <b>${fmtKr(total)}</b>`;
+    // G30: ingen BEKRAEFTET fragt -- for en kendt udenlandsk saelger (fx
+    // Vinted PL/SE/FI, se matching.py/bundling.py) tilbyder vi enten et
+    // landegennemsnits-ESTIMAT (link til den AEGTE annonce, saa man selv
+    // kan tjekke den rigtige pris ved checkout) eller blot "ukendt" hvis
+    // ingen data findes endnu -- BEGGE tilfaelde faar en blyant-knap, saa
+    // rapportering kan starte allerede foer estimatet er tilgaengeligt.
+    const country = m.seller_country;
+    const isForeign = country && country !== "DK";
+    const pencilBtn = isForeign
+      ? `<button class="pencil-btn" data-country="${escapeHtml(country)}" data-source="${escapeHtml(m.source || "vinted")}" data-url="${escapeHtml(m.url || "")}" title="Rapportér den rigtige fragt for ${escapeHtml(country)}">✏️</button>`
+      : "";
+    if (isForeign && m.shipping_price_estimate != null) {
+      const estTotal = m.price != null ? m.price + m.shipping_price_estimate : null;
+      const estText = `~${fmtKr(m.shipping_price_estimate)} (estimat, ${m.shipping_price_estimate_count} obs.)`;
+      const totalText = estTotal != null ? ` · Total: ~${fmtKr(estTotal)}` : "";
+      return `Vare: <b>${fmtKr(m.price)}</b> · Fragt: <a class="shipping-estimate-link" href="${escapeHtml(m.url || "#")}" target="_blank" rel="noopener">${estText}</a>${pencilBtn}${totalText}`;
+    }
+    return `Vare: <b>${fmtKr(m.price)}</b> · Fragt: ukendt${pencilBtn}`;
   }
 
   function renderMatchesList(matches) {
@@ -734,6 +837,17 @@
 
   document.getElementById("matches-type-filter").addEventListener("change", applyMatchesFilterAndSort);
   document.getElementById("matches-sort").addEventListener("change", applyMatchesFilterAndSort);
+
+  // G30: event-delegation for blyant-knapper -- matches-list' indhold
+  // genskabes helt ved hver renderMatchesList()-kald (innerHTML), saa
+  // individuelt-tilknyttede listeners ville forsvinde ved hver ny visning.
+  // ÉT listener paa den STABILE beholder fanger klik paa alle nuvaerende
+  // OG fremtidige .pencil-btn-knapper.
+  document.getElementById("matches-list").addEventListener("click", (e) => {
+    const btn = e.target.closest(".pencil-btn");
+    if (!btn) return;
+    showShippingObservationDialog(btn.dataset.country, btn.dataset.source);
+  });
 
   // G6-FIX (kritikrunde-fund #3): tidligere blev der IKKE vist nogen
   // fejlbesked hvis Workeren fejlede (fx en 500 fra /api/matches, eller en

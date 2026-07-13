@@ -40,7 +40,7 @@ G28   Secrets-scanning (gitleaks)       Size 2        TODO
 G29   matching/pricing -> scraper-core  Size 2        TODO (lav prioritet)
 ----  --------------------------------  ------------  --------
       BUSINESS-SPOR (efter teknisk spor, eller ved omprioritering)
-G30   Vinted-fragt: manuelt tjek-flow   TBD           TODO (feature #1)
+G30   Vinted-fragt: manuelt tjek-flow   TBD           BACKEND+UI DONE (afventer seeding)
 G22   Vinted: login-baseret fragt       Size 5-6      DELVIST BLOKERET
 G4    Region-filtrering (afhentning)    WSJF 3.5      TODO
 G2    Notifikationer (opsummering)      WSJF 4.3      TODO (konens brug)
@@ -519,18 +519,79 @@ bundle. `watchdog.py`s `run_with_timeout()` (per-kilde timeout,
 supplement til `hang_guard.py`s proces-niveau watchdog) IKKE taget i
 brug -- lavere prioritet, ingen akut anledning. Size 2.
 
-**G30 (TODO, business #1) — Vinted-fragt: manuelt tjek-flow.**
-Erstatning for det automatisk-blokerede spor i G22. Esben foreslog:
-et menneske (Esben) gennemfører selv et par checkout-klik i egen
-browser (løser en evt. CAPTCHA som menneske, samme princip som DBA-
-login) og rapporterer de observerede rigtige fragttal tilbage --
-IKKE automatisering, et bevidst manuelt datapunkt-indsamlings-flow.
-Mulig udformning: en let "tjek fragt manuelt"-genvej i webappen
-(direkte link til annoncen) for udenlandske Vinted-fund, så Esben/
-konen hurtigt kan slå den reelle pris op ved behov uden at forlade
-flowet. Kræver et designvalg om hvor meget UI-understøttelse der er
-værd at bygge vs. bare et rent manuelt ad-hoc-flow. TBD, afventer
-scope-afklaring.
+**G30 (BACKEND+UI DONE, 2026-07-13 — afventer seeding, business #1) —
+Vinted-fragt: manuelt tjek-flow.** Erstatning for det automatisk-
+blokerede spor i G22. Esben: et menneske gennemfører selv et par
+checkout-klik i egen browser (løser en evt. CAPTCHA som menneske,
+samme princip som DBA-login) og rapporterer de observerede rigtige
+fragttal tilbage -- IKKE automatisering, et bevidst manuelt datapunkt-
+indsamlings-flow, med backend der husker fragt PR. TERRITORIUM og
+tager et LØBENDE GENNEMSNIT (overlever at de underliggende annoncer
+forsvinder).
+
+**Data-lag:** ny Turso-tabel `shipping_observations` (id, source,
+country, shipping_price, observed_at) -- ÉT raekke PR. OBSERVATION
+(aldrig en overskrivning), gennemsnittet beregnes ved LAESNING
+(`turso_io.get_shipping_estimates()`). `MIN_SHIPPING_OBSERVATIONS = 10`
+(duplikeret som konstant i baade `turso_io.py` og `bundling.py`, bevidst
+IKKE en import for at `bundling.py` forbliver Turso-fri) -- under
+graensen vises fortsat "ukendt", ikke et upaalideligt estimat.
+
+**Backend:** `bundling.apply_shipping_estimates()` (nyt) beriger
+matches IN-PLACE med adskilte `shipping_price_estimate`/
+`shipping_price_estimate_count`-felter -- `shipping_price` (det
+BEKRAEFTEDE felt) roeres ALDRIG, samme "gaet aldrig stille"-princip som
+G6/G16/G20/G21. `build_bundles()` fik et nyt `country_shipping_
+estimates`-argument (default `None` = PRAECIS G21-fixets adfaerd,
+ingen regression) -- naar et lands gennemsnit er over graensen bruges
+det som `shipping_dkk` med `shipping_is_country_estimate=True`
+(adskilt fra den gamle danske `shipping_is_assumed`-antagelse), og
+bundle-oekonomien (total/effektiv pris/besparelse/"betaler sig")
+beregnes nu KORREKT med det data-baserede tal i stedet for at forblive
+"ukendt". `monitor.py` henter `country_shipping_estimates` ÉN gang i
+hovedtraaden (samme moenster som `cached_details`, G10) og giver det
+read-only videre til hver kildes `run_source()`-kald.
+
+**API:** to nye `worker.js`-endpoints -- `GET /api/shipping-estimates`
+(samme `{land: {avg, count}}`-form som Python-siden) og
+`POST /api/shipping-observation` (server-side valideret: 2-bogstavs
+landekode, positiv pris maks. 2000 kr., samme princip som den
+eksisterende `POST /api/wishlist`-validering).
+
+**UI (webapp):** individuelle Vinted-matches for kendte udenlandske
+lande viser nu enten "Fragt: ~65 kr. (estimat, 12 obs.)" (som et link
+til den AEGTE annonce, saa man selv kan tjekke prisen ved checkout)
+eller "Fragt: ukendt" -- BEGGE med en ✏️-knap der aabner en dialog
+("Hvad var den reelle fragtpris?"), poster til det nye endpoint, og
+genindlaeser data. Bundles viser samme estimat + observationstal i
+deres eksisterende fragt-linje. Blyanten sidder bevidst KUN paa
+individuelle matches, ikke bundles (bundles arver automatisk samme
+landegennemsnit via backend'en -- ingen dobbelt-rapporterings-UX
+noedvendig). **Sheets** viser estimatet som ren tekst
+("~65 kr. (estimat, 12 obs.)") via nye `_match_shipping_display()`/
+`_bundle_shipping_note()`-helpers -- UDEN blyant/dialog (ren
+interaktiv webapp-funktion, Sheets forbliver read-mostly).
+
+**Verificeret grundigt:** ny skema+funktioner testet direkte mod ægte
+Turso (skriv, laes, idempotent skema-udvidelse); `bundling.py`s 4
+scenarier (uden estimater = uaendret G21-adfaerd; under graensen =
+fortsat "ukendt"; over graensen = korrekt estimat+oekonomi; dansk
+kendt-fragt-saelger upaavirket); `apply_shipping_estimates()` LIVE mod
+rigtige Vinted-fund (5 PL + 1 SE-fund korrekt beriget); Worker-
+endpoints LIVE deployet og testet (gyldig observation, ugyldig
+landekode -> 400, negativ pris -> 400, manglende API-key -> 401);
+`sheets_output.py`s nye helpers unit-testet (7 cases); FULD Playwright-
+UI-test mod produktions-API -- aabn dialog, valideringsfejl ved tom
+input, gem en observation, bekraeft den REELT naaede Turso, dialog
+lukker korrekt; ingen mobil-overflow ved 320px/375px (baade med og
+uden aaben dialog).
+
+**Afventer:** seeding af min. 10 observationer for Polen/Sverige/
+Finland (de hyppigst ramte lande) foer estimater rent faktisk vises i
+praksis -- systemet virker korrekt med 0 data (viser "ukendt" som i
+dag), saa dette blokerer IKKE selve funktionens korrekthed. Kan ikke
+gøres af Claude i denne session (ingen synlig/interaktiv browser paa
+denne homelab-server, se separat Claude-i-Chrome-prompt til Esben).
 
 **G10-G12 leveret (2026-07-10) — hastighedsoptimering + hængnings-hærdning:**
 
